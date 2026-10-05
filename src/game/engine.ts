@@ -1,0 +1,196 @@
+import { FISH, FishKind, GAME, SHARK } from './config';
+
+export interface Fish {
+  id: number;
+  kind: FishKind;
+  x: number;
+  y: number;
+  angle: number;
+  wobble: number;
+}
+
+export interface GameState {
+  width: number;
+  height: number;
+  bankWidth: number;
+  time: number;
+  shark: { x: number; y: number; angle: number; radius: number; speed: number; blink: number };
+  joystick: { active: boolean; ox: number; oy: number; dx: number; dy: number };
+  fish: Fish[];
+  score: number;
+  lives: number;
+  over: boolean;
+  spawnTimer: number;
+  nextId: number;
+}
+
+export interface GameEvents {
+  onEat: (score: number) => void;
+  onHurt: () => void;
+}
+
+const FISH_KINDS = Object.keys(FISH) as FishKind[];
+
+export function createGame(width: number, height: number): GameState {
+  return {
+    width,
+    height,
+    bankWidth: Math.max(18, width * 0.06),
+    time: 0,
+    shark: { x: width / 2, y: height * 0.65, angle: -Math.PI / 2, radius: SHARK.baseRadius, speed: 0, blink: 0 },
+    joystick: { active: false, ox: 0, oy: 0, dx: 0, dy: 0 },
+    fish: [],
+    score: 0,
+    lives: GAME.lives,
+    over: false,
+    spawnTimer: 0,
+    nextId: 1,
+  };
+}
+
+function pickKind(): FishKind {
+  const total = FISH_KINDS.reduce((sum, k) => sum + FISH[k].weight, 0);
+  let r = Math.random() * total;
+  for (const kind of FISH_KINDS) {
+    r -= FISH[kind].weight;
+    if (r <= 0) return kind;
+  }
+  return 'anchovy';
+}
+
+function spawnFish(g: GameState) {
+  const kind = pickKind();
+  const margin = 30;
+  const left = g.bankWidth;
+  const right = g.width - g.bankWidth;
+  // 위/아래/좌/우 가장자리 중 한 곳에서 수로 안쪽으로 헤엄쳐 들어온다.
+  const side = Math.floor(Math.random() * 4);
+  let x: number;
+  let y: number;
+  let angle: number;
+  const jitter = (Math.random() - 0.5) * 0.9;
+  if (side === 0) {
+    x = left + Math.random() * (right - left);
+    y = -margin;
+    angle = Math.PI / 2 + jitter;
+  } else if (side === 1) {
+    x = left + Math.random() * (right - left);
+    y = g.height + margin;
+    angle = -Math.PI / 2 + jitter;
+  } else if (side === 2) {
+    x = left - margin;
+    y = Math.random() * g.height;
+    angle = 0 + jitter;
+  } else {
+    x = right + margin;
+    y = Math.random() * g.height;
+    angle = Math.PI + jitter;
+  }
+  g.fish.push({ id: g.nextId++, kind, x, y, angle, wobble: Math.random() * Math.PI * 2 });
+}
+
+function normalizeAngle(a: number) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+export function setJoystick(g: GameState, active: boolean, ox = 0, oy = 0, dx = 0, dy = 0) {
+  g.joystick.active = active;
+  g.joystick.ox = ox;
+  g.joystick.oy = oy;
+  g.joystick.dx = dx;
+  g.joystick.dy = dy;
+}
+
+export function updateGame(g: GameState, dt: number, events: GameEvents) {
+  g.time += dt;
+  if (g.over) return;
+
+  const s = g.shark;
+
+  // --- 조이스틱 입력 -> 상어 이동 ---
+  const { active, dx, dy } = g.joystick;
+  const mag = Math.min(Math.hypot(dx, dy), SHARK.joystickRadius);
+  const throttle = active ? mag / SHARK.joystickRadius : 0;
+  if (active && mag > 4) {
+    const target = Math.atan2(dy, dx);
+    const diff = normalizeAngle(target - s.angle);
+    s.angle += diff * Math.min(1, SHARK.turnRate * dt);
+  }
+  const targetSpeed = throttle * SHARK.maxSpeed;
+  s.speed += (targetSpeed - s.speed) * Math.min(1, 6 * dt);
+  s.x += Math.cos(s.angle) * s.speed * dt;
+  s.y += Math.sin(s.angle) * s.speed * dt;
+
+  // 수로 벽(양쪽 둑)과 위아래 경계
+  const minX = g.bankWidth + s.radius * 0.6;
+  const maxX = g.width - g.bankWidth - s.radius * 0.6;
+  s.x = Math.min(maxX, Math.max(minX, s.x));
+  s.y = Math.min(g.height - s.radius, Math.max(s.radius, s.y));
+  if (s.blink > 0) s.blink -= dt;
+
+  // --- 물고기 스폰 ---
+  g.spawnTimer -= dt;
+  if (g.spawnTimer <= 0 && g.fish.length < GAME.maxFish) {
+    spawnFish(g);
+    g.spawnTimer = GAME.spawnInterval;
+  }
+
+  // --- 물고기 이동/충돌 ---
+  const mouthX = s.x + Math.cos(s.angle) * s.radius * 0.9;
+  const mouthY = s.y + Math.sin(s.angle) * s.radius * 0.9;
+
+  for (let i = g.fish.length - 1; i >= 0; i--) {
+    const f = g.fish[i];
+    const spec = FISH[f.kind];
+
+    // 상어가 가까우면 반대 방향으로 도망
+    const fx = f.x - s.x;
+    const fy = f.y - s.y;
+    const dist = Math.hypot(fx, fy);
+    let speed = spec.speed;
+    if (spec.flee > 0 && dist < 130 && !spec.harmful) {
+      const away = Math.atan2(fy, fx);
+      const diff = normalizeAngle(away - f.angle);
+      f.angle += diff * Math.min(1, 4 * spec.flee * dt);
+      speed *= 1 + 0.6 * spec.flee;
+    } else {
+      f.wobble += dt * 3;
+      f.angle += Math.sin(f.wobble) * 0.6 * dt;
+    }
+    f.x += Math.cos(f.angle) * speed * dt;
+    f.y += Math.sin(f.angle) * speed * dt;
+
+    // 화면 밖으로 충분히 나가면 제거
+    const out = 60;
+    if (f.x < -out || f.x > g.width + out || f.y < -out || f.y > g.height + out) {
+      g.fish.splice(i, 1);
+      continue;
+    }
+
+    // 충돌: 입 위치와 물고기 거리
+    const hit = Math.hypot(f.x - mouthX, f.y - mouthY) < s.radius * 0.7 + spec.radius * 0.6;
+    if (!hit) continue;
+
+    if (spec.harmful) {
+      if (s.blink <= 0) {
+        g.lives -= 1;
+        s.blink = GAME.invulnerableSeconds;
+        events.onHurt();
+        if (g.lives <= 0) g.over = true;
+      }
+      g.fish.splice(i, 1);
+    } else {
+      g.score += spec.score;
+      s.radius = Math.min(
+        SHARK.maxRadius,
+        SHARK.baseRadius + Math.floor(g.score / SHARK.growEveryScore),
+      );
+      g.fish.splice(i, 1);
+      events.onEat(spec.score);
+    }
+  }
+}
+
+export const visitorsFor = (score: number) => score * GAME.visitorsPerScore;

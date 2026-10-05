@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "bookang",
+    "name": "북항이",
     "slug": "bookang",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true
     },
