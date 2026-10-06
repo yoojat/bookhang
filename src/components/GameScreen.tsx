@@ -1,11 +1,11 @@
 import { Canvas, Picture, SkPicture } from '@shopify/react-native-skia';
 import * as Haptics from 'expo-haptics';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { GAME } from '../game/config';
-import { createGame, GameState, setJoystick, updateGame, visitorsFor } from '../game/engine';
+import { createGame, resetGame, setJoystick, updateGame, visitorsFor } from '../game/engine';
 import { LABELS } from '../game/map';
 import { renderGame } from '../game/render';
 
@@ -28,20 +28,16 @@ interface Hud {
 
 export default function GameScreen() {
   const { width, height } = useWindowDimensions();
-  const game = useRef<GameState>(createGame(width, height));
+  // 게임 상태는 매 프레임 바뀌므로 React state 가 아니라 변경 가능한 객체에 둔다.
+  const [game] = useState(() => createGame(width, height));
   const [frame, setFrame] = useState<Frame | null>(null);
   const [hud, setHud] = useState<Hud>({ score: 0, lives: GAME.lives, over: false });
   const [best, setBest] = useState(0);
 
   const restart = useCallback(() => {
-    game.current = createGame(width, height);
+    resetGame(game, width, height);
     setHud({ score: 0, lives: GAME.lives, over: false });
-  }, [width, height]);
-
-  // 화면 크기가 바뀌면(회전 등) 게임을 새로 시작한다.
-  useEffect(() => {
-    restart();
-  }, [restart]);
+  }, [game, width, height]);
 
   useEffect(() => {
     let raf = 0;
@@ -49,12 +45,12 @@ export default function GameScreen() {
 
     const events = {
       onEat: () => {
-        const g = game.current;
+        const g = game;
         setHud({ score: g.score, lives: g.lives, over: g.over });
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       },
       onHurt: () => {
-        const g = game.current;
+        const g = game;
         setHud({ score: g.score, lives: g.lives, over: g.over });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
         if (g.over) setBest((b) => Math.max(b, g.score));
@@ -64,14 +60,14 @@ export default function GameScreen() {
     const loop = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      const g = game.current;
+      const g = game;
       updateGame(g, dt, events);
       setFrame({ picture: renderGame(g), camX: g.camera.x, camY: g.camera.y, zoom: g.zoom });
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [game]);
 
   // 화면 어디든 터치한 지점을 중심으로 드래그하면 조이스틱처럼 동작한다.
   const pan = useMemo(
@@ -79,13 +75,13 @@ export default function GameScreen() {
       Gesture.Pan()
         .runOnJS(true)
         .minDistance(0)
-        .onBegin((e) => setJoystick(game.current, true, e.x, e.y, 0, 0))
+        .onBegin((e) => setJoystick(game, true, e.x, e.y, 0, 0))
         .onUpdate((e) => {
-          const j = game.current.joystick;
-          setJoystick(game.current, true, j.ox, j.oy, e.translationX, e.translationY);
+          const j = game.joystick;
+          setJoystick(game, true, j.ox, j.oy, e.translationX, e.translationY);
         })
-        .onFinalize(() => setJoystick(game.current, false)),
-    [],
+        .onFinalize(() => setJoystick(game, false)),
+    [game],
   );
 
   return (

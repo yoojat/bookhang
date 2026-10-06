@@ -10,11 +10,14 @@ import {
   StrokeJoin,
 } from '@shopify/react-native-skia';
 
-import { COLORS, FISH, SHARK } from './config';
-import { Fish, GameState } from './engine';
+import { COLORS, SHARK } from './config';
+import { GameState } from './engine';
+import { fill, stroke } from './paint';
+import { drawFish, drawShark, drawSpectator } from './sprites';
 import {
   BRIDGES,
   CANAL_WIDTH,
+  CROWD,
   GATES,
   HALF_W,
   PATH,
@@ -26,110 +29,6 @@ import {
 } from './map';
 
 const paintCache = new Map<string, SkPaint>();
-
-function fill(color: string): SkPaint {
-  let p = paintCache.get(color);
-  if (!p) {
-    p = Skia.Paint();
-    p.setAntiAlias(true);
-    p.setColor(Skia.Color(color));
-    paintCache.set(color, p);
-  }
-  return p;
-}
-
-function stroke(color: string, width: number): SkPaint {
-  const key = `s:${color}:${width}`;
-  let p = paintCache.get(key);
-  if (!p) {
-    p = Skia.Paint();
-    p.setAntiAlias(true);
-    p.setColor(Skia.Color(color));
-    p.setStyle(PaintStyle.Stroke);
-    p.setStrokeWidth(width);
-    paintCache.set(key, p);
-  }
-  return p;
-}
-
-function triangle(x1: number, y1: number, x2: number, y2: number, x3: number, y3: number) {
-  const path = Skia.Path.Make();
-  path.moveTo(x1, y1);
-  path.lineTo(x2, y2);
-  path.lineTo(x3, y3);
-  path.close();
-  return path;
-}
-
-// 위에서 내려다본 물고기 (머리가 +x 방향)
-function drawFish(canvas: SkCanvas, f: Fish) {
-  const spec = FISH[f.kind];
-  const r = spec.radius;
-  canvas.save();
-  canvas.translate(f.x, f.y);
-  canvas.rotate((f.angle * 180) / Math.PI, 0, 0);
-
-  // 꼬리
-  canvas.drawPath(triangle(-r * 0.8, 0, -r * 1.6, -r * 0.6, -r * 1.6, r * 0.6), fill(spec.color));
-  // 몸통
-  const bodyLen = f.kind === 'puffer' ? r : r * 1.3;
-  const bodyWid = f.kind === 'puffer' ? r : r * 0.55;
-  canvas.drawOval(Skia.XYWHRect(-bodyLen, -bodyWid, bodyLen * 2, bodyWid * 2), fill(spec.color));
-  canvas.drawOval(
-    Skia.XYWHRect(-bodyLen * 0.7, -bodyWid * 0.35, bodyLen * 1.5, bodyWid * 0.7),
-    fill(spec.belly),
-  );
-  if (f.kind === 'puffer') {
-    // 가시
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
-      canvas.drawCircle(Math.cos(a) * r, Math.sin(a) * r, 1.8, fill('#7a5d1c'));
-    }
-  }
-  // 눈
-  canvas.drawCircle(bodyLen * 0.55, -bodyWid * 0.5, Math.max(1.4, r * 0.14), fill('#111'));
-  canvas.drawCircle(bodyLen * 0.55, bodyWid * 0.5, Math.max(1.4, r * 0.14), fill('#111'));
-  canvas.restore();
-}
-
-// 위에서 내려다본 상어 (머리가 +x 방향, 길이 ≈ 반지름 * 4)
-function drawShark(canvas: SkCanvas, g: GameState) {
-  const s = g.shark;
-  const k = s.radius / SHARK.baseRadius;
-
-  // 피격 후 무적 시간에는 깜빡임
-  if (s.blink > 0 && Math.floor(s.blink * 10) % 2 === 0) return;
-
-  const swim = Math.sin(g.time * (4 + s.speed / 30)) * (0.25 + s.speed / 600);
-
-  canvas.save();
-  canvas.translate(s.x, s.y);
-  canvas.rotate((s.angle * 180) / Math.PI, 0, 0);
-  canvas.scale(k, k);
-
-  // 꼬리지느러미 (좌우로 흔들림)
-  canvas.save();
-  canvas.translate(-36, 0);
-  canvas.rotate((swim * 180) / Math.PI, 0, 0);
-  canvas.drawPath(triangle(0, 0, -22, -15, -14, 0), fill(COLORS.sharkFin));
-  canvas.drawPath(triangle(0, 0, -22, 15, -14, 0), fill(COLORS.sharkFin));
-  canvas.restore();
-
-  // 가슴지느러미
-  canvas.drawPath(triangle(8, -9, -8, -30, -14, -9), fill(COLORS.sharkFin));
-  canvas.drawPath(triangle(8, 9, -8, 30, -14, 9), fill(COLORS.sharkFin));
-
-  // 몸통
-  canvas.drawOval(Skia.XYWHRect(-40, -13, 80, 26), fill(COLORS.shark));
-  canvas.drawOval(Skia.XYWHRect(-24, -6, 56, 12), fill(COLORS.sharkBelly));
-  // 등지느러미 (위에서 보면 몸 중앙의 작은 삼각형)
-  canvas.drawPath(triangle(2, 0, -14, -5, -14, 5), fill(COLORS.sharkFin));
-  // 눈
-  canvas.drawCircle(26, -8, 2.4, fill('#101820'));
-  canvas.drawCircle(26, 8, 2.4, fill('#101820'));
-
-  canvas.restore();
-}
 
 let worldPath: SkPath | null = null;
 function getWorldPath() {
@@ -292,6 +191,24 @@ function drawJoystick(canvas: SkCanvas, g: GameState) {
   canvas.drawCircle(j.ox + Math.cos(a) * m, j.oy + Math.sin(a) * m, 20, fill('rgba(255,255,255,0.45)'));
 }
 
+// 수로 주변에서 구경하는 사람들. 화면에 보이는 사람만 y 순서대로 그린다.
+function drawCrowd(canvas: SkCanvas, g: GameState) {
+  const halfW = g.width / g.zoom / 2 + 70;
+  const halfH = g.height / g.zoom / 2 + 90;
+  const visible: number[] = [];
+  for (let i = 0; i < g.crowd.shown; i++) {
+    const p = CROWD[i];
+    if (Math.abs(p.x - g.camera.x) < halfW && Math.abs(p.y - g.camera.y) < halfH) visible.push(i);
+  }
+  visible.sort((a, b) => CROWD[a].y - CROWD[b].y);
+  const cheering = g.cheerUntil > g.time;
+  for (const i of visible) {
+    const p = CROWD[i];
+    const near = Math.hypot(p.x - g.shark.x, p.y - g.shark.y) < 800;
+    drawSpectator(canvas, p, g.time, g.crowd.appear[i], cheering && near, g.shark.x >= p.x ? 1 : -1);
+  }
+}
+
 export function renderGame(g: GameState): SkPicture {
   return createPicture(
     (canvas) => {
@@ -302,7 +219,8 @@ export function renderGame(g: GameState): SkPicture {
       canvas.translate(-g.camera.x, -g.camera.y);
       canvas.drawPicture(back);
       drawFlow(canvas, g);
-      for (const f of g.fish) drawFish(canvas, f);
+      drawCrowd(canvas, g);
+      for (const f of g.fish) drawFish(canvas, f, g.time);
       drawShark(canvas, g);
       // 다리와 그물은 상어 위로 지나간다.
       canvas.drawPicture(front);

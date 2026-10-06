@@ -34,6 +34,7 @@ const STEPS = 14;
 
 export const CANAL_WIDTH = 380;
 export const HALF_W = CANAL_WIDTH / 2;
+const CROWD_SLOTS = 240;
 
 // 지도 좌표(크롭 이미지 기준) 1716 부근에서 수로가 바다와 만난다.
 export const SEA_Y = 1715 * SCALE;
@@ -146,14 +147,14 @@ export interface Constrained {
 }
 
 // 위치를 플레이 가능한 수로 안으로 밀어 넣는다. r 은 몸 반지름.
-export function constrain(x: number, y: number, r: number): Constrained {
+export function constrain(x: number, y: number, r: number, endInset = r * 0.8): Constrained {
   let hit = false;
   let n = nearestPlay(x, y);
 
   // 양 끝은 둥글게 막히지 않고 차단선(그물/부표)에서 평평하게 막는다.
   if (n.s >= PLAY_END_S - 0.5) {
     const along = (x - END.x) * END_T.x + (y - END.y) * END_T.y;
-    const lim = -r * 0.8;
+    const lim = -endInset;
     if (along > lim) {
       x -= END_T.x * (along - lim);
       y -= END_T.y * (along - lim);
@@ -162,7 +163,7 @@ export function constrain(x: number, y: number, r: number): Constrained {
     }
   } else if (n.s <= PLAY_START_S + 0.5) {
     const along = (x - START.x) * START_T.x + (y - START.y) * START_T.y;
-    const lim = r * 0.8;
+    const lim = endInset;
     if (along < lim) {
       x += START_T.x * (lim - along);
       y += START_T.y * (lim - along);
@@ -258,3 +259,54 @@ export const LABELS: MapLabel[] = [
   labelBeside(BRIDGE6_S, '제6보도교 · 바다 출구', 1),
   { text: '외해', x: PATH[PATH.length - 1].x + 260, y: SEA_Y + 380 },
 ];
+
+// --- 구경꾼 자리 ---
+export interface Spectator {
+  x: number;
+  y: number;
+  shirt: number;
+  pants: number;
+  hair: number;
+  skin: number;
+  // -1 이면 모자 없음
+  cap: number;
+  phone: boolean;
+  phase: number;
+}
+
+function buildCrowd(): Spectator[] {
+  let seed = 21;
+  const rnd = () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296;
+  };
+  const startS = (BRIDGE4_S + BRIDGE5_S) / 2 - 300;
+  const crowd: Spectator[] = [];
+  let tries = 0;
+  while (crowd.length < CROWD_SLOTS && tries < 5000) {
+    tries++;
+    // 처음 나타나는 사람들은 시작 위치 근처에 모아서 바로 보이게 한다.
+    const s =
+      crowd.length < 14
+        ? startS + (rnd() - 0.5) * 1000
+        : PLAY_START_S - 250 + rnd() * (PLAY_END_S - PLAY_START_S + 500);
+    if (BRIDGES.some((b) => Math.abs(b.s - s) < 130)) continue;
+    const p = pointAt(s);
+    const side = rnd() < 0.5 ? -1 : 1;
+    const off = HALF_W + 44 + rnd() * 46;
+    crowd.push({
+      x: p.x - Math.sin(p.angle) * side * off,
+      y: p.y + Math.cos(p.angle) * side * off,
+      shirt: Math.floor(rnd() * 8),
+      pants: Math.floor(rnd() * 4),
+      hair: Math.floor(rnd() * 6),
+      skin: Math.floor(rnd() * 3),
+      cap: rnd() < 0.25 ? Math.floor(rnd() * 3) : -1,
+      phone: rnd() < 0.4,
+      phase: rnd() * Math.PI * 2,
+    });
+  }
+  return crowd;
+}
+
+export const CROWD = buildCrowd();

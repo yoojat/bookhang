@@ -35,8 +35,10 @@ export const GAME = {
   spawnInterval: 0.45,
   lives: 3,
   invulnerableSeconds: 1.5,
-  // 점수 1점당 늘어나는 "방문객" 수치 연출용 배율
-  visitorsPerScore: 120,
+  // 구경꾼: 기본 인원 + 점수 N점마다 1명. 사람 한 명이 방문객 수 몇 명을 나타내는지도 정한다.
+  crowdBase: 8,
+  scorePerPerson: 10,
+  visitorsPerPerson: 1200,
 };
 
 export const COLORS = {
