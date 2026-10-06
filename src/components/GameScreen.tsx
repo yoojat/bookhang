@@ -6,7 +6,19 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { GAME } from '../game/config';
 import { createGame, GameState, setJoystick, updateGame, visitorsFor } from '../game/engine';
+import { LABELS } from '../game/map';
 import { renderGame } from '../game/render';
+
+// 부캉이가 북항 친수공원 수로에 처음 나타난 날 (2026-09-18)
+const SHARK_ARRIVED = new Date(2026, 8, 18).getTime();
+const daysSinceArrival = () => Math.max(1, Math.floor((Date.now() - SHARK_ARRIVED) / 86400000) + 1);
+
+interface Frame {
+  picture: SkPicture;
+  camX: number;
+  camY: number;
+  zoom: number;
+}
 
 interface Hud {
   score: number;
@@ -17,7 +29,7 @@ interface Hud {
 export default function GameScreen() {
   const { width, height } = useWindowDimensions();
   const game = useRef<GameState>(createGame(width, height));
-  const [picture, setPicture] = useState<SkPicture | null>(null);
+  const [frame, setFrame] = useState<Frame | null>(null);
   const [hud, setHud] = useState<Hud>({ score: 0, lives: GAME.lives, over: false });
   const [best, setBest] = useState(0);
 
@@ -54,7 +66,7 @@ export default function GameScreen() {
       last = now;
       const g = game.current;
       updateGame(g, dt, events);
-      setPicture(renderGame(g));
+      setFrame({ picture: renderGame(g), camX: g.camera.x, camY: g.camera.y, zoom: g.zoom });
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -80,9 +92,21 @@ export default function GameScreen() {
     <View style={styles.root}>
       <GestureDetector gesture={pan}>
         <View style={StyleSheet.absoluteFill}>
-          <Canvas style={StyleSheet.absoluteFill}>{picture && <Picture picture={picture} />}</Canvas>
+          <Canvas style={StyleSheet.absoluteFill}>{frame && <Picture picture={frame.picture} />}</Canvas>
         </View>
       </GestureDetector>
+
+      {frame &&
+        LABELS.map((l) => {
+          const sx = (l.x - frame.camX) * frame.zoom + width / 2;
+          const sy = (l.y - frame.camY) * frame.zoom + height / 2;
+          if (sx < -80 || sx > width + 80 || sy < -30 || sy > height + 30) return null;
+          return (
+            <Text key={l.text} pointerEvents="none" style={[styles.label, { left: sx - 70, top: sy - 10 }]}>
+              {l.text}
+            </Text>
+          );
+        })}
 
       <View style={styles.hud} pointerEvents="none">
         <View>
@@ -90,6 +114,7 @@ export default function GameScreen() {
           <Text style={styles.visitors}>
             오늘의 방문객 {visitorsFor(hud.score).toLocaleString()}명
           </Text>
+          <Text style={styles.visitors}>북항 체류 {daysSinceArrival()}일째</Text>
         </View>
         <Text style={styles.lives}>{'❤️'.repeat(hud.lives) || '💀'}</Text>
       </View>
@@ -122,6 +147,16 @@ const styles = StyleSheet.create({
   score: { color: '#fff', fontSize: 40, fontWeight: '800' },
   visitors: { color: 'rgba(255,255,255,0.85)', fontSize: 14, marginTop: 2 },
   lives: { fontSize: 22 },
+  label: {
+    position: 'absolute',
+    width: 140,
+    textAlign: 'center',
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowRadius: 3,
+  },
   overlay: {
     ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.55)',

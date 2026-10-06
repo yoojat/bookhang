@@ -1,4 +1,5 @@
 import { FISH, FishKind, GAME, SHARK } from './config';
+import { constrain, playStartPoint, randomPlayPoint } from './map';
 
 export interface Fish {
   id: number;
@@ -10,9 +11,11 @@ export interface Fish {
 }
 
 export interface GameState {
+  // 화면 크기 (조이스틱/카메라 계산용)
   width: number;
   height: number;
-  bankWidth: number;
+  zoom: number;
+  camera: { x: number; y: number };
   time: number;
   shark: { x: number; y: number; angle: number; radius: number; speed: number; blink: number };
   joystick: { active: boolean; ox: number; oy: number; dx: number; dy: number };
@@ -31,23 +34,6 @@ export interface GameEvents {
 
 const FISH_KINDS = Object.keys(FISH) as FishKind[];
 
-export function createGame(width: number, height: number): GameState {
-  return {
-    width,
-    height,
-    bankWidth: Math.max(18, width * 0.06),
-    time: 0,
-    shark: { x: width / 2, y: height * 0.65, angle: -Math.PI / 2, radius: SHARK.baseRadius, speed: 0, blink: 0 },
-    joystick: { active: false, ox: 0, oy: 0, dx: 0, dy: 0 },
-    fish: [],
-    score: 0,
-    lives: GAME.lives,
-    over: false,
-    spawnTimer: 0,
-    nextId: 1,
-  };
-}
-
 function pickKind(): FishKind {
   const total = FISH_KINDS.reduce((sum, k) => sum + FISH[k].weight, 0);
   let r = Math.random() * total;
@@ -58,35 +44,38 @@ function pickKind(): FishKind {
   return 'anchovy';
 }
 
-function spawnFish(g: GameState) {
+// 화면 밖에서 수로 안쪽 임의 위치에 물고기를 하나 만든다.
+function spawnFish(g: GameState, minDist: number) {
   const kind = pickKind();
-  const margin = 30;
-  const left = g.bankWidth;
-  const right = g.width - g.bankWidth;
-  // 위/아래/좌/우 가장자리 중 한 곳에서 수로 안쪽으로 헤엄쳐 들어온다.
-  const side = Math.floor(Math.random() * 4);
-  let x: number;
-  let y: number;
-  let angle: number;
-  const jitter = (Math.random() - 0.5) * 0.9;
-  if (side === 0) {
-    x = left + Math.random() * (right - left);
-    y = -margin;
-    angle = Math.PI / 2 + jitter;
-  } else if (side === 1) {
-    x = left + Math.random() * (right - left);
-    y = g.height + margin;
-    angle = -Math.PI / 2 + jitter;
-  } else if (side === 2) {
-    x = left - margin;
-    y = Math.random() * g.height;
-    angle = 0 + jitter;
-  } else {
-    x = right + margin;
-    y = Math.random() * g.height;
-    angle = Math.PI + jitter;
+  const spec = FISH[kind];
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const p = randomPlayPoint(spec.radius * 2);
+    if (Math.hypot(p.x - g.shark.x, p.y - g.shark.y) < minDist) continue;
+    g.fish.push({ id: g.nextId++, kind, x: p.x, y: p.y, angle: Math.random() * Math.PI * 2, wobble: Math.random() * 6 });
+    return;
   }
-  g.fish.push({ id: g.nextId++, kind, x, y, angle, wobble: Math.random() * Math.PI * 2 });
+}
+
+export function createGame(width: number, height: number): GameState {
+  const zoom = width / GAME.viewWidth;
+  const start = playStartPoint();
+  const g: GameState = {
+    width,
+    height,
+    zoom,
+    camera: { x: start.x, y: start.y },
+    time: 0,
+    shark: { x: start.x, y: start.y, angle: Math.PI / 2, radius: SHARK.baseRadius, speed: 0, blink: 0 },
+    joystick: { active: false, ox: 0, oy: 0, dx: 0, dy: 0 },
+    fish: [],
+    score: 0,
+    lives: GAME.lives,
+    over: false,
+    spawnTimer: 0,
+    nextId: 1,
+  };
+  for (let i = 0; i < GAME.maxFish; i++) spawnFish(g, 300);
+  return g;
 }
 
 function normalizeAngle(a: number) {
@@ -105,9 +94,14 @@ export function setJoystick(g: GameState, active: boolean, ox = 0, oy = 0, dx = 
 
 export function updateGame(g: GameState, dt: number, events: GameEvents) {
   g.time += dt;
-  if (g.over) return;
-
   const s = g.shark;
+
+  // 카메라는 상어를 부드럽게 따라간다.
+  const follow = Math.min(1, 6 * dt);
+  g.camera.x += (s.x - g.camera.x) * follow;
+  g.camera.y += (s.y - g.camera.y) * follow;
+
+  if (g.over) return;
 
   // --- 조이스틱 입력 -> 상어 이동 ---
   const { active, dx, dy } = g.joystick;
@@ -123,17 +117,18 @@ export function updateGame(g: GameState, dt: number, events: GameEvents) {
   s.x += Math.cos(s.angle) * s.speed * dt;
   s.y += Math.sin(s.angle) * s.speed * dt;
 
-  // 수로 벽(양쪽 둑)과 위아래 경계
-  const minX = g.bankWidth + s.radius * 0.6;
-  const maxX = g.width - g.bankWidth - s.radius * 0.6;
-  s.x = Math.min(maxX, Math.max(minX, s.x));
-  s.y = Math.min(g.height - s.radius, Math.max(s.radius, s.y));
+  // 수로 벽에 부딪히면 벽을 따라 미끄러진다.
+  const wall = constrain(s.x, s.y, s.radius * 0.9);
+  s.x = wall.x;
+  s.y = wall.y;
   if (s.blink > 0) s.blink -= dt;
 
-  // --- 물고기 스폰 ---
+  // --- 물고기 스폰 (화면 밖에서만) ---
   g.spawnTimer -= dt;
   if (g.spawnTimer <= 0 && g.fish.length < GAME.maxFish) {
-    spawnFish(g);
+    const halfW = g.width / g.zoom / 2;
+    const halfH = g.height / g.zoom / 2;
+    spawnFish(g, Math.hypot(halfW, halfH) + 40);
     g.spawnTimer = GAME.spawnInterval;
   }
 
@@ -150,7 +145,7 @@ export function updateGame(g: GameState, dt: number, events: GameEvents) {
     const fy = f.y - s.y;
     const dist = Math.hypot(fx, fy);
     let speed = spec.speed;
-    if (spec.flee > 0 && dist < 130 && !spec.harmful) {
+    if (spec.flee > 0 && dist < GAME.fleeDistance && !spec.harmful) {
       const away = Math.atan2(fy, fx);
       const diff = normalizeAngle(away - f.angle);
       f.angle += diff * Math.min(1, 4 * spec.flee * dt);
@@ -162,11 +157,13 @@ export function updateGame(g: GameState, dt: number, events: GameEvents) {
     f.x += Math.cos(f.angle) * speed * dt;
     f.y += Math.sin(f.angle) * speed * dt;
 
-    // 화면 밖으로 충분히 나가면 제거
-    const out = 60;
-    if (f.x < -out || f.x > g.width + out || f.y < -out || f.y > g.height + out) {
-      g.fish.splice(i, 1);
-      continue;
+    // 수로 벽에 닿으면 안쪽으로 방향을 튼다.
+    const c = constrain(f.x, f.y, spec.radius * 1.4);
+    if (c.hit) {
+      f.x = c.x;
+      f.y = c.y;
+      const inward = c.nx === 0 && c.ny === 0 ? f.angle + Math.PI : Math.atan2(c.ny, c.nx);
+      f.angle = inward + (Math.random() - 0.5) * 0.8;
     }
 
     // 충돌: 입 위치와 물고기 거리
