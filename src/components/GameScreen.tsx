@@ -1,29 +1,28 @@
 import { Canvas, Picture, SkPicture } from '@shopify/react-native-skia';
 import * as Haptics from 'expo-haptics';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
-import { GAME } from '../game/config';
-import { createGame, resetGame, setJoystick, updateGame, visitorsFor } from '../game/engine';
+import { GAME, ItemKind } from '../game/config';
+import { createGame, crowdSize, cupsSold, resetGame, resetPaused, setJoystick, updateGame, visitorsFor } from '../game/engine';
 import { LABELS } from '../game/map';
 import { renderGame } from '../game/render';
-
-// 부캉이가 북항 친수공원 수로에 처음 나타난 날 (2026-09-18)
-const SHARK_ARRIVED = new Date(2026, 8, 18).getTime();
-const daysSinceArrival = () => Math.max(1, Math.floor((Date.now() - SHARK_ARRIVED) / 86400000) + 1);
 
 interface Frame {
   picture: SkPicture;
   camX: number;
   camY: number;
   zoom: number;
+  time: number;
+  playTime: number;
 }
 
 interface Hud {
   score: number;
   lives: number;
   over: boolean;
+  people: number;
 }
 
 export default function GameScreen() {
@@ -31,12 +30,35 @@ export default function GameScreen() {
   // 게임 상태는 매 프레임 바뀌므로 React state 가 아니라 변경 가능한 객체에 둔다.
   const [game] = useState(() => createGame(width, height));
   const [frame, setFrame] = useState<Frame | null>(null);
-  const [hud, setHud] = useState<Hud>({ score: 0, lives: GAME.lives, over: false });
-  const [best, setBest] = useState(0);
+  const [hud, setHud] = useState<Hud>({ score: 0, lives: GAME.lives, over: false, people: crowdSize(0) });
+  // 방금 늘어난 구경꾼 수를 잠깐 보여준다.
+  const [gain, setGain] = useState({ n: 0, until: 0 });
+  // 생닭이 날아올 때 잠깐 띄우는 안내
+  const [toast, setToast] = useState({ text: '', until: 0 });
+  // 카페인 부스트가 끝나는 게임 시각
+  const [boostUntil, setBoostUntil] = useState(0);
+  // 최고 기록과 방금 끝난 판의 결과
+  const bestRef = useRef(0);
+  const [result, setResult] = useState({ best: 0, isNew: false });
+  const [screen, setScreen] = useState<'title' | 'play'>('play');
 
   const restart = useCallback(() => {
     resetGame(game, width, height);
-    setHud({ score: 0, lives: GAME.lives, over: false });
+    setHud({ score: 0, lives: GAME.lives, over: false, people: crowdSize(0) });
+    setGain({ n: 0, until: 0 });
+    setToast({ text: '', until: 0 });
+    setBoostUntil(0);
+    setScreen('play');
+  }, [game, width, height]);
+
+  // 그만하기: 새 판을 준비해 두고 시작 화면에서 멈춘다.
+  const quit = useCallback(() => {
+    resetPaused(game, width, height);
+    setHud({ score: 0, lives: GAME.lives, over: false, people: crowdSize(0) });
+    setGain({ n: 0, until: 0 });
+    setToast({ text: '', until: 0 });
+    setBoostUntil(0);
+    setScreen('title');
   }, [game, width, height]);
 
   useEffect(() => {
@@ -44,16 +66,37 @@ export default function GameScreen() {
     let last = performance.now();
 
     const events = {
-      onEat: () => {
+      onEat: (_score: number, people: number) => {
         const g = game;
-        setHud({ score: g.score, lives: g.lives, over: g.over });
+        setHud({ score: g.score, lives: g.lives, over: g.over, people: g.crowd.shown });
+        if (people > 0) setGain({ n: people, until: game.time + 1.1 });
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      },
+      onThrow: (kind: ItemKind) =>
+        setToast({
+          text:
+            kind === 'coffee'
+              ? '☕ 어디야 배달! 마시면 10초 부스트'
+              : '🐔 생닭이 날아온다! 먹으면 ❤️ +1',
+          until: game.time + 3.2,
+        }),
+      onBoost: (until: number) => {
+        setBoostUntil(until);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      },
+      onHeal: () => {
+        setHud({ score: game.score, lives: game.lives, over: game.over, people: game.crowd.shown });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       },
       onHurt: () => {
         const g = game;
-        setHud({ score: g.score, lives: g.lives, over: g.over });
+        setHud({ score: g.score, lives: g.lives, over: g.over, people: g.crowd.shown });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-        if (g.over) setBest((b) => Math.max(b, g.score));
+        if (g.over) {
+          const prev = bestRef.current;
+          bestRef.current = Math.max(prev, g.score);
+          setResult({ best: bestRef.current, isNew: g.score > prev });
+        }
       },
     };
 
@@ -62,7 +105,7 @@ export default function GameScreen() {
       last = now;
       const g = game;
       updateGame(g, dt, events);
-      setFrame({ picture: renderGame(g), camX: g.camera.x, camY: g.camera.y, zoom: g.zoom });
+      setFrame({ picture: renderGame(g), camX: g.camera.x, camY: g.camera.y, zoom: g.zoom, time: g.time, playTime: g.playTime });
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -84,6 +127,9 @@ export default function GameScreen() {
     [game],
   );
 
+  // 북항 체류일: 0일에서 시작해 플레이 시간에 따라 늘어난다.
+  const days = frame ? Math.floor(frame.playTime / GAME.secondsPerDay) : 0;
+
   return (
     <View style={styles.root}>
       <GestureDetector gesture={pan}>
@@ -98,30 +144,88 @@ export default function GameScreen() {
           const sy = (l.y - frame.camY) * frame.zoom + height / 2;
           if (sx < -80 || sx > width + 80 || sy < -30 || sy > height + 30) return null;
           return (
-            <Text key={l.text} pointerEvents="none" style={[styles.label, { left: sx - 70, top: sy - 10 }]}>
-              {l.text}
+            <Text
+              key={l.dynamic ?? l.text}
+              pointerEvents="none"
+              style={[
+                styles.label,
+                l.dynamic === 'cups' && styles.cups,
+                l.sign === 'title' && styles.signTitle,
+                l.sign === 'sub' && styles.signSub,
+                { left: sx - (l.dynamic ? 90 : 70), top: sy - (l.sign === 'title' ? 12 : l.sign === 'sub' ? 6 : 10) },
+              ]}>
+              {l.dynamic === 'cups' ? `☕ 오늘 ${cupsSold(hud.people).toLocaleString()}잔 판매` : l.text}
             </Text>
           );
         })}
 
       <View style={styles.hud} pointerEvents="none">
-        <View>
-          <Text style={styles.score}>{hud.score}</Text>
-          <Text style={styles.visitors}>
-            오늘의 방문객 {visitorsFor(hud.score).toLocaleString()}명
-          </Text>
-          <Text style={styles.visitors}>북항 체류 {daysSinceArrival()}일째</Text>
-        </View>
-        <Text style={styles.lives}>{'❤️'.repeat(hud.lives) || '💀'}</Text>
+        <Text style={styles.score}>{hud.score}</Text>
+        <Text style={styles.lives}>
+          {'❤️'.repeat(Math.max(0, hud.lives))}
+          {'🖤'.repeat(Math.max(0, GAME.lives - hud.lives))}
+        </Text>
+        {frame && frame.time < boostUntil && (
+          <Text style={styles.boost}>⚡ 카페인 부스트 {Math.ceil(boostUntil - frame.time)}초</Text>
+        )}
+        <Text style={styles.visitors}>
+          👥 구경꾼 {hud.people}명
+          {frame && frame.time < gain.until && <Text style={styles.gain}>  +{gain.n}</Text>}
+        </Text>
+        <Text style={styles.visitors}>오늘의 방문객 {visitorsFor(hud.score).toLocaleString()}명</Text>
+        <Text style={styles.visitors}>북항 체류 {days}일째</Text>
       </View>
+
+      {frame && frame.time < toast.until && !hud.over && (
+        <View style={styles.toast} pointerEvents="none">
+          <Text style={styles.toastText}>{toast.text}</Text>
+        </View>
+      )}
 
       {hud.over && (
         <View style={styles.overlay}>
-          <Text style={styles.overTitle}>게임 오버</Text>
-          <Text style={styles.overScore}>점수 {hud.score}</Text>
-          <Text style={styles.overScore}>최고 {best}</Text>
-          <Pressable style={styles.button} onPress={restart}>
-            <Text style={styles.buttonText}>다시 시작</Text>
+          <View style={styles.card}>
+            <Text style={styles.cardEmoji}>🦈</Text>
+            <Text style={styles.cardTitle}>게임 종료</Text>
+            <View style={styles.stats}>
+              <View style={styles.stat}>
+                <Text style={styles.statValue}>{hud.score}</Text>
+                <Text style={styles.statLabel}>점수</Text>
+              </View>
+              <View style={styles.stat}>
+                <Text style={styles.statValue}>{hud.people}</Text>
+                <Text style={styles.statLabel}>구경꾼</Text>
+              </View>
+              <View style={styles.stat}>
+                <Text style={styles.statValue}>{result.best}</Text>
+                <Text style={styles.statLabel}>최고 기록</Text>
+              </View>
+            </View>
+            <Text style={styles.cardSub}>
+              북항 체류 {days}일 · 방문객 {visitorsFor(hud.score).toLocaleString()}명
+            </Text>
+            {result.isNew && <Text style={styles.newBest}>🏆 최고 기록 갱신!</Text>}
+            <Text style={styles.ask}>다시 도전할까요?</Text>
+            <View style={styles.buttons}>
+              <Pressable style={[styles.button, styles.buttonGhost]} onPress={quit}>
+                <Text style={styles.buttonGhostText}>그만하기</Text>
+              </Pressable>
+              <Pressable style={[styles.button, styles.buttonMain]} onPress={restart}>
+                <Text style={styles.buttonText}>다시 하기</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {screen === 'title' && (
+        <View style={[styles.overlay, styles.titleOverlay]}>
+          <Text style={styles.titleEmoji}>🦈</Text>
+          <Text style={styles.titleName}>북항이</Text>
+          <Text style={styles.titleSub}>북항 친수공원 수로에 갇힌 아기 상어{'\n'}배고픈 북항이를 도와주세요!</Text>
+          {result.best > 0 && <Text style={styles.titleBest}>🏆 최고 기록 {result.best}</Text>}
+          <Pressable style={[styles.button, styles.buttonMain, styles.startButton]} onPress={restart}>
+            <Text style={styles.buttonText}>게임 시작</Text>
           </Pressable>
         </View>
       )}
@@ -135,14 +239,50 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 54,
     left: 24,
-    right: 24,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
   },
   score: { color: '#fff', fontSize: 40, fontWeight: '800' },
   visitors: { color: 'rgba(255,255,255,0.85)', fontSize: 14, marginTop: 2 },
-  lives: { fontSize: 22 },
+  lives: { fontSize: 22, marginTop: 2, marginBottom: 4 },
+  signTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 2,
+    textShadowRadius: 0,
+  },
+  cups: {
+    width: 180,
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#ffffff',
+    backgroundColor: '#1f3f77',
+    borderColor: '#ffffff',
+    borderWidth: 2,
+    borderRadius: 14,
+    overflow: 'hidden',
+    paddingVertical: 4,
+    textShadowRadius: 0,
+  },
+  signSub: {
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 4,
+    color: '#bfe6f5',
+    textShadowRadius: 0,
+  },
+  toast: {
+    position: 'absolute',
+    bottom: 120,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255,251,232,0.95)',
+    borderColor: '#2a3342',
+    borderWidth: 3,
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  toastText: { fontSize: 15, fontWeight: '900', color: '#2a3342' },
+  boost: { color: '#ffd34a', fontSize: 15, fontWeight: '900', marginBottom: 2 },
+  gain: { color: '#ffe066', fontWeight: '800' },
   label: {
     position: 'absolute',
     width: 140,
@@ -155,19 +295,54 @@ const styles = StyleSheet.create({
   },
   overlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(5,25,45,0.6)',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    padding: 24,
   },
-  overTitle: { color: '#fff', fontSize: 36, fontWeight: '800', marginBottom: 8 },
-  overScore: { color: '#fff', fontSize: 20 },
-  button: {
-    marginTop: 20,
-    backgroundColor: '#ffd35a',
-    paddingHorizontal: 32,
-    paddingVertical: 14,
+  card: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#fff8e8',
     borderRadius: 28,
+    borderWidth: 4,
+    borderColor: '#2a3342',
+    paddingVertical: 26,
+    paddingHorizontal: 22,
+    alignItems: 'center',
   },
-  buttonText: { fontSize: 18, fontWeight: '800', color: '#3a2a00' },
+  cardEmoji: { fontSize: 44 },
+  cardTitle: { fontSize: 28, fontWeight: '900', color: '#2a3342', marginTop: 2 },
+  stats: { flexDirection: 'row', marginTop: 18, gap: 10, width: '100%' },
+  stat: {
+    flex: 1,
+    backgroundColor: '#e6f3fb',
+    borderRadius: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  statValue: { fontSize: 24, fontWeight: '900', color: '#1f4d6e' },
+  statLabel: { fontSize: 12, color: '#4a6a80', marginTop: 2, fontWeight: '700' },
+  cardSub: { marginTop: 14, fontSize: 14, color: '#5a6a78' },
+  newBest: { marginTop: 10, fontSize: 16, fontWeight: '900', color: '#d9822b' },
+  ask: { marginTop: 20, fontSize: 20, fontWeight: '800', color: '#2a3342' },
+  buttons: { flexDirection: 'row', gap: 12, marginTop: 16, width: '100%' },
+  button: {
+    flex: 1,
+    paddingVertical: 15,
+    borderRadius: 22,
+    borderWidth: 3,
+    borderColor: '#2a3342',
+    alignItems: 'center',
+  },
+  buttonMain: { backgroundColor: '#ffd35a' },
+  buttonGhost: { backgroundColor: '#ffffff' },
+  buttonText: { fontSize: 18, fontWeight: '900', color: '#3a2a00' },
+  buttonGhostText: { fontSize: 18, fontWeight: '800', color: '#4a5a68' },
+  titleOverlay: { backgroundColor: 'rgba(8,40,70,0.72)' },
+  titleEmoji: { fontSize: 72 },
+  titleName: { fontSize: 56, fontWeight: '900', color: '#ffffff', letterSpacing: 4, marginTop: 4 },
+  titleSub: { fontSize: 16, color: 'rgba(255,255,255,0.9)', textAlign: 'center', marginTop: 10, lineHeight: 24 },
+  titleBest: { marginTop: 18, fontSize: 18, fontWeight: '800', color: '#ffe066' },
+  startButton: { flex: 0, alignSelf: 'stretch', marginTop: 32, marginHorizontal: 40 },
 });

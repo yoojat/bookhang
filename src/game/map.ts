@@ -220,6 +220,10 @@ export interface Tree {
   tone: number;
 }
 
+// 수로 바깥(오른쪽 기슭 너머)에 있는 카페 "어디야". 실제 상표와 겹치지 않도록 이름과 디자인을 따로 만들었다.
+const SHOP_P = pointAt(BRIDGE4_S + 900);
+export const SHOP = { x: SHOP_P.x + HALF_W + 105, y: SHOP_P.y - 120, w: 260, h: 220 };
+
 function buildTrees(): Tree[] {
   let seed = 7;
   const rnd = () => {
@@ -234,6 +238,8 @@ function buildTrees(): Tree[] {
     const y = WORLD.minY + rnd() * (SEA_Y - 80 - WORLD.minY);
     const n = nearestIn(x, y, 0, PATH.length - 1);
     if (n.dist < HALF_W + 150) continue;
+    // 카페와 그 앞마당은 비워 둔다.
+    if (x > SHOP.x - 90 && x < SHOP.x + SHOP.w + 90 && y > SHOP.y - 90 && y < SHOP.y + SHOP.h + 350) continue;
     trees.push({ x, y, r: 26 + rnd() * 22, tone: Math.floor(rnd() * 3) });
   }
   return trees;
@@ -245,6 +251,10 @@ export interface MapLabel {
   text: string;
   x: number;
   y: number;
+  // 가게 간판 글자: title 은 가게 이름, sub 는 작은 부제
+  sign?: 'title' | 'sub';
+  // 게임 상태에 따라 글자가 바뀌는 라벨
+  dynamic?: 'cups';
 }
 
 function labelBeside(s: number, text: string, side: 1 | -1): MapLabel {
@@ -257,6 +267,9 @@ export const LABELS: MapLabel[] = [
   labelBeside(BRIDGE5_S, '제5보도교', 1),
   labelBeside(PLAY_END_S, '차단 그물', 1),
   labelBeside(BRIDGE6_S, '제6보도교 · 바다 출구', 1),
+  { text: '어디야', x: SHOP.x + SHOP.w / 2 + 26, y: SHOP.y + SHOP.h * 0.2 + 12, sign: 'title' },
+  { text: 'COFFEE', x: SHOP.x + SHOP.w / 2 + 26, y: SHOP.y + SHOP.h * 0.2 + 36, sign: 'sub' },
+  { text: '', x: SHOP.x + SHOP.w / 2, y: SHOP.y - 26, dynamic: 'cups' },
   { text: '외해', x: PATH[PATH.length - 1].x + 260, y: SEA_Y + 380 },
 ];
 
@@ -272,6 +285,14 @@ export interface Spectator {
   cap: number;
   phone: boolean;
   phase: number;
+  // 머리 모양: 0 짧은 머리, 1 단발, 2 포니테일, 3 올림머리
+  hairStyle: number;
+  dress: boolean;
+  kid: boolean;
+  // -1 이면 풍선 없음
+  balloon: number;
+  // 테이크아웃 커피를 들고 있는지
+  cup: boolean;
 }
 
 function buildCrowd(): Spectator[] {
@@ -304,9 +325,52 @@ function buildCrowd(): Spectator[] {
       cap: rnd() < 0.25 ? Math.floor(rnd() * 3) : -1,
       phone: rnd() < 0.4,
       phase: rnd() * Math.PI * 2,
+      hairStyle: Math.floor(rnd() * 4),
+      dress: rnd() < 0.3,
+      kid: rnd() < 0.2,
+      balloon: rnd() < 0.15 ? Math.floor(rnd() * 4) : -1,
+      cup: false,
     });
   }
   return crowd;
 }
 
 export const CROWD = buildCrowd();
+
+// --- 어디야 카페 앞 대기줄 ---
+// 구경꾼이 늘수록 줄이 길어진다. 문 앞(0번)이 맨 앞 손님이다.
+export const QUEUE_MAX = 12;
+
+function buildQueue(): Spectator[] {
+  let seed = 99;
+  const rnd = () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    return seed / 4294967296;
+  };
+  const doorX = SHOP.x + SHOP.w / 2;
+  const doorY = SHOP.y + SHOP.h;
+  const queue: Spectator[] = [];
+  for (let i = 0; i < QUEUE_MAX; i++) {
+    queue.push({
+      // 문에서 아래로 지그재그로 선다.
+      x: doorX + (i % 2 === 0 ? -14 : 14),
+      y: doorY + 34 + i * 24,
+      shirt: Math.floor(rnd() * 8),
+      pants: Math.floor(rnd() * 4),
+      hair: Math.floor(rnd() * 6),
+      skin: Math.floor(rnd() * 3),
+      cap: rnd() < 0.2 ? Math.floor(rnd() * 3) : -1,
+      phone: i > 0 && rnd() < 0.3,
+      phase: rnd() * Math.PI * 2,
+      hairStyle: Math.floor(rnd() * 4),
+      dress: rnd() < 0.3,
+      kid: false,
+      balloon: -1,
+      // 맨 앞 손님은 막 받은 커피를 들고 있다.
+      cup: i === 0,
+    });
+  }
+  return queue;
+}
+
+export const QUEUE = buildQueue();

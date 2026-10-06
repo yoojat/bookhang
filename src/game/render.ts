@@ -10,19 +10,23 @@ import {
   StrokeJoin,
 } from '@shopify/react-native-skia';
 
-import { COLORS, SHARK } from './config';
+import { CHICKEN, COLORS, SHARK } from './config';
 import { GameState } from './engine';
+import { drawShot } from './cannon';
 import { fill, stroke } from './paint';
-import { drawFish, drawShark, drawSpectator } from './sprites';
+import { drawChicken, drawCoffee, drawFish, drawShark, drawSpectator } from './sprites';
 import {
   BRIDGES,
   CANAL_WIDTH,
   CROWD,
   GATES,
+  QUEUE,
   HALF_W,
   PATH,
   pointAt,
   SEA_Y,
+  SHOP,
+  Spectator,
   TOTAL_LENGTH,
   TREES,
   WORLD,
@@ -80,6 +84,125 @@ function drawCanal(canvas: SkCanvas) {
     Skia.XYWHRect(PATH[PATH.length - 1].x - HALF_W, SEA_Y - 60, CANAL_WIDTH, 70),
     fill(COLORS.sea),
   );
+}
+
+function box(canvas: SkCanvas, x: number, y: number, w: number, h: number, color: string, ow = 3) {
+  const r = Skia.XYWHRect(x, y, w, h);
+  canvas.drawRect(r, fill(color));
+  if (ow > 0) canvas.drawRect(r, stroke('#2a3342', ow, true));
+}
+
+const NAVY = '#1f3f77';
+const NAVY_DARK = '#12295a';
+const SKY = '#bfe6f5';
+
+// 김이 나는 커피잔 아이콘: 가게가 카페라는 걸 알려준다.
+function drawCup(canvas: SkCanvas, cx: number, cy: number, scale: number, body: string, line: string) {
+  canvas.save();
+  canvas.translate(cx, cy);
+  canvas.scale(scale, scale);
+  // 김
+  for (const dx of [-6, 0, 6]) {
+    const steam = Skia.Path.Make();
+    steam.moveTo(dx, -12);
+    steam.quadTo(dx - 4, -18, dx, -23);
+    steam.quadTo(dx + 4, -28, dx, -33);
+    canvas.drawPath(steam, stroke(body, 2.4, true));
+  }
+  // 잔 받침, 손잡이, 잔
+  canvas.drawOval(Skia.XYWHRect(-17, 8, 34, 8), fill(body));
+  canvas.drawOval(Skia.XYWHRect(5, -6, 15, 15), stroke(body, 3.6, true));
+  const cup = Skia.Path.Make();
+  cup.moveTo(-13, -10);
+  cup.lineTo(13, -10);
+  cup.lineTo(9, 10);
+  cup.lineTo(-9, 10);
+  cup.close();
+  canvas.drawPath(cup, fill(body));
+  canvas.drawLine(-11, -4, 11, -4, stroke(line, 2.2, true));
+  canvas.restore();
+}
+
+// 위에서 비스듬히 본 작은 카페 "어디야". 남색 간판과 차양, 커피잔 그림으로 카페라는 인상을 준다.
+// 간판 글자는 화면 위에 따로 얹는다.
+function drawShop(canvas: SkCanvas) {
+  const { x, y, w, h } = SHOP;
+  const roofH = h * 0.4;
+  const wallY = y + roofH;
+  const wallH = h - roofH;
+
+  // 그림자와 앞마당 타일 바닥
+  canvas.drawOval(Skia.XYWHRect(x - 10, y + h - 14, w + 20, 36), fill('rgba(0,0,0,0.16)'));
+  box(canvas, x - 30, y + h + 6, w + 60, 150, '#e6ebf1', 0);
+  for (let i = 1; i < 6; i++) {
+    canvas.drawLine(x - 30 + ((w + 60) * i) / 6, y + h + 6, x - 30 + ((w + 60) * i) / 6, y + h + 156, stroke('rgba(120,140,170,0.25)', 2));
+  }
+
+  // 흰 벽과 남색 지붕
+  box(canvas, x, wallY, w, wallH, '#f7f9fc');
+  const roof = Skia.Path.Make();
+  roof.moveTo(x - 16, wallY + 6);
+  roof.lineTo(x + 24, y);
+  roof.lineTo(x + w - 24, y);
+  roof.lineTo(x + w + 16, wallY + 6);
+  roof.close();
+  canvas.drawPath(roof, fill(NAVY));
+  canvas.drawLine(x + 30, y + 8, x + w - 30, y + 8, stroke('rgba(255,255,255,0.22)', 4, true));
+  canvas.drawPath(roof, stroke('#2a3342', 3.4, true));
+
+  // 남색 간판: 왼쪽에 커피잔, 가운데에 가게 이름이 얹힌다.
+  const bx = x + 24;
+  const by = y + roofH * 0.5;
+  box(canvas, bx, by, w - 48, 54, NAVY_DARK);
+  canvas.drawRect(Skia.XYWHRect(bx + 5, by + 5, w - 58, 44), stroke('rgba(255,255,255,0.8)', 2));
+  drawCup(canvas, bx + 36, by + 31, 0.8, '#ffffff', NAVY_DARK);
+
+  // 남색/흰색 줄무늬 차양
+  const stripeW = w / 10;
+  for (let i = 0; i < 10; i++) {
+    const c = i % 2 === 0 ? '#2a4f8f' : '#ffffff';
+    box(canvas, x + i * stripeW, wallY, stripeW, 26, c, 2);
+    canvas.drawCircle(x + i * stripeW + stripeW / 2, wallY + 26, stripeW / 2, fill(c));
+    canvas.drawCircle(x + i * stripeW + stripeW / 2, wallY + 26, stripeW / 2, stroke('#2a3342', 2, true));
+  }
+
+  // 큰 유리창(커피잔 스티커)과 유리문
+  box(canvas, x + 20, wallY + 46, 78, 62, SKY);
+  box(canvas, x + w - 98, wallY + 46, 78, 62, SKY);
+  canvas.drawLine(x + 28, wallY + 56, x + 56, wallY + 56, stroke('rgba(255,255,255,0.8)', 4, true));
+  canvas.drawLine(x + w - 90, wallY + 56, x + w - 62, wallY + 56, stroke('rgba(255,255,255,0.8)', 4, true));
+  drawCup(canvas, x + 59, wallY + 86, 0.55, NAVY, SKY);
+  drawCup(canvas, x + w - 59, wallY + 86, 0.55, NAVY, SKY);
+  box(canvas, x + w / 2 - 24, wallY + 40, 48, wallH - 40, SKY);
+  canvas.drawLine(x + w / 2, wallY + 40, x + w / 2, y + h, stroke('#2a3342', 2.4, true));
+  // OPEN 푯말
+  box(canvas, x + w / 2 - 14, wallY + 72, 28, 12, '#ff6b6b', 2);
+  canvas.drawLine(x + w / 2 - 8, wallY + 78, x + w / 2 + 8, wallY + 78, stroke('#ffffff', 2.6, true));
+
+  // 입구 옆 메뉴판(칠판)과 화분
+  box(canvas, x + w / 2 + 34, y + h - 54, 40, 54, '#2a2f3a');
+  drawCup(canvas, x + w / 2 + 54, y + h - 28, 0.4, '#ffffff', '#2a2f3a');
+  canvas.drawLine(x + w / 2 + 40, y + h - 10, x + w / 2 + 68, y + h - 10, stroke('rgba(255,255,255,0.7)', 2, true));
+  for (const px of [x + 10, x + w - 10]) {
+    canvas.drawCircle(px, y + h - 6, 13, fill('#d98c5f'));
+    canvas.drawCircle(px, y + h - 6, 13, stroke('#2a3342', 2.4, true));
+    canvas.drawCircle(px, y + h - 16, 11, fill('#5aa955'));
+    canvas.drawCircle(px - 4, y + h - 19, 3.4, fill('#ff8fb3'));
+    canvas.drawCircle(px + 5, y + h - 15, 3.4, fill('#ffd34a'));
+  }
+
+  // 앞마당 테이블과 남색 파라솔
+  for (const tx of [x + 44, x + w - 44]) {
+    const ty = y + h + 74;
+    canvas.drawCircle(tx, ty + 8, 34, fill('rgba(0,0,0,0.12)'));
+    canvas.drawCircle(tx, ty, 34, fill(NAVY));
+    canvas.drawCircle(tx, ty, 34, stroke('#2a3342', 3, true));
+    canvas.drawCircle(tx, ty, 8, fill('#ffffff'));
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      canvas.drawLine(tx, ty, tx + Math.cos(a) * 33, ty + Math.sin(a) * 33, stroke('rgba(255,255,255,0.5)', 3, true));
+    }
+  }
 }
 
 function drawTrees(canvas: SkCanvas) {
@@ -155,6 +278,7 @@ function getWorldPictures() {
     worldBack = createPicture((canvas) => {
       drawLand(canvas);
       drawCanal(canvas);
+      drawShop(canvas);
       drawTrees(canvas);
     }, bounds);
     worldFront = createPicture((canvas) => {
@@ -191,6 +315,9 @@ function drawJoystick(canvas: SkCanvas, g: GameState) {
   canvas.drawCircle(j.ox + Math.cos(a) * m, j.oy + Math.sin(a) * m, 20, fill('rgba(255,255,255,0.45)'));
 }
 
+// 상어가 이 거리 안으로 오면 구경꾼이 하트를 띄우며 좋아한다.
+const LOVE_DISTANCE = 330;
+
 // 수로 주변에서 구경하는 사람들. 화면에 보이는 사람만 y 순서대로 그린다.
 function drawCrowd(canvas: SkCanvas, g: GameState) {
   const halfW = g.width / g.zoom / 2 + 70;
@@ -204,8 +331,66 @@ function drawCrowd(canvas: SkCanvas, g: GameState) {
   const cheering = g.cheerUntil > g.time;
   for (const i of visible) {
     const p = CROWD[i];
-    const near = Math.hypot(p.x - g.shark.x, p.y - g.shark.y) < 800;
-    drawSpectator(canvas, p, g.time, g.crowd.appear[i], cheering && near, g.shark.x >= p.x ? 1 : -1);
+    // 상어가 먹이를 먹으면 가까운 사람들이 응원하고, 상어가 바로 옆으로 오면 하트를 띄우며 좋아한다.
+    const d = Math.hypot(p.x - g.shark.x, p.y - g.shark.y);
+    const close = d < LOVE_DISTANCE;
+    drawSpectator(canvas, p, g.time, g.crowd.appear[i], (cheering && d < 800) || close, g.shark.x >= p.x ? 1 : -1, null, false, close);
+  }
+}
+
+// 어디야 카페 앞에 줄 선 손님들. 구경꾼이 늘수록 줄이 길어지고, 상어가 먹으면 함께 응원한다.
+function drawQueue(canvas: SkCanvas, g: GameState) {
+  const halfW = g.width / g.zoom / 2 + 70;
+  const halfH = g.height / g.zoom / 2 + 90;
+  const cheering = g.cheerUntil > g.time;
+  // 아래쪽 손님이 앞에 보이도록 y 순서(위 -> 아래)로 그린다. 줄은 이미 위에서 아래로 늘어서 있다.
+  for (let i = 0; i < g.queue.shown; i++) {
+    const p = QUEUE[i];
+    if (Math.abs(p.x - g.camera.x) > halfW || Math.abs(p.y - g.camera.y) > halfH) continue;
+    const close = Math.hypot(p.x - g.shark.x, p.y - g.shark.y) < LOVE_DISTANCE;
+    drawSpectator(canvas, p, g.time, g.queue.appear[i], cheering || close, g.shark.x >= p.x ? 1 : -1, null, false, close);
+  }
+}
+
+// 물건 던지는 사람: 생닭은 요리사, 아이스 아메리카노는 어디야 바리스타. 던지기 직전에는 팔을 번쩍 든다.
+function drawThrower(canvas: SkCanvas, g: GameState) {
+  const th = g.thrower;
+  if (!th) return;
+  const chef: Spectator = {
+    x: th.x,
+    y: th.y,
+    shirt: 6,
+    pants: 0,
+    hair: 1,
+    skin: 0,
+    cap: -1,
+    phone: false,
+    phase: 0,
+    hairStyle: 0,
+    dress: false,
+    kid: false,
+    balloon: -1,
+    cup: false,
+  };
+  const windup = th.t > 0.25 && th.t < CHICKEN.throwAt + 0.4;
+  drawSpectator(canvas, chef, g.time, g.time - th.t, windup, th.lx >= th.x ? 1 : -1, th.kind === 'coffee' ? 'barista' : 'chef');
+}
+
+// flying=true 이면 공중에 떠 있는 닭만, false 이면 물에 떨어진 닭만 그린다.
+function drawChickens(canvas: SkCanvas, g: GameState, flying: boolean) {
+  for (const c of g.chickens) {
+    if (c.t < CHICKEN.flight) {
+      if (!flying) continue;
+      const u = c.t / CHICKEN.flight;
+      const draw = c.kind === 'coffee' ? drawCoffee : drawChicken;
+      draw(canvas, c.sx + (c.x - c.sx) * u, c.sy + (c.y - c.sy) * u, g.time, Math.sin(Math.PI * u) * 120, u * 720, true);
+    } else {
+      if (flying) continue;
+      const age = c.t - CHICKEN.flight;
+      // 가라앉기 직전 2초 동안은 깜빡인다.
+      const visible = age < CHICKEN.rest - 2 || Math.floor(age * 8) % 2 === 0;
+      (c.kind === 'coffee' ? drawCoffee : drawChicken)(canvas, c.x, c.y, g.time, 0, 0, visible);
+    }
   }
 }
 
@@ -220,8 +405,13 @@ export function renderGame(g: GameState): SkPicture {
       canvas.drawPicture(back);
       drawFlow(canvas, g);
       drawCrowd(canvas, g);
+      drawQueue(canvas, g);
+      drawThrower(canvas, g);
+      drawChickens(canvas, g, false);
       for (const f of g.fish) drawFish(canvas, f, g.time);
       drawShark(canvas, g);
+      drawChickens(canvas, g, true);
+      for (const shot of g.shots) drawShot(canvas, shot);
       // 다리와 그물은 상어 위로 지나간다.
       canvas.drawPicture(front);
       canvas.restore();
