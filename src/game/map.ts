@@ -117,9 +117,23 @@ function snapS(mapX: number, mapY: number) {
 export const BRIDGE4_S = snapS(480, 600);
 export const BRIDGE5_S = snapS(465, 1290);
 export const BRIDGE6_S = snapS(100, 1690);
-// 부캉이가 실제로 머무는 구간: 제4보도교 ~ 제5보도교 아래 차단 그물
+// 수로가 바다와 만나는 지점(누적 길이): 여기를 지나 바다로 나가면 엔딩이다.
+function sAtY(y: number) {
+  for (let i = 1; i < PATH.length; i++) {
+    if (PATH[i].y >= y) {
+      const t = (y - PATH[i - 1].y) / Math.max(1e-6, PATH[i].y - PATH[i - 1].y);
+      return CUM[i - 1] + t * (CUM[i] - CUM[i - 1]);
+    }
+  }
+  return TOTAL_LENGTH;
+}
+export const EXIT_S = sAtY(SEA_Y);
+
+// 플레이 구간: 제4보도교 바로 위(부표 줄)부터 수로 끝(바다)까지.
 export const PLAY_START_S = BRIDGE4_S - 140;
-export const PLAY_END_S = BRIDGE5_S + 330;
+export const PLAY_END_S = TOTAL_LENGTH - 5;
+// 물고기/배/사람이 나타날 수 있는 구간의 끝 (바다 쪽 입구에서 조금 떨어진 곳)
+export const SPAWN_END_S = EXIT_S - 150;
 
 const indexAtS = (s: number) => {
   let i = 0;
@@ -187,8 +201,13 @@ export function constrain(x: number, y: number, r: number, endInset = r * 0.8): 
 }
 
 // 수로 위의 임의 지점 (오프셋: 중심선에서 옆으로 떨어진 거리)
-export function randomPlayPoint(margin: number) {
-  const s = PLAY_START_S + 120 + Math.random() * (PLAY_END_S - PLAY_START_S - 240);
+export function randomPlayPoint(margin: number, center?: { s: number; spread: number }) {
+  const lo = PLAY_START_S + 120;
+  const hi = SPAWN_END_S - 60;
+  // center 가 있으면 그 주변에서만 고른다. (구간이 길어져도 상어 주변에 물고기가 충분히 있도록)
+  const s = center
+    ? Math.min(hi, Math.max(lo, center.s + (Math.random() * 2 - 1) * center.spread))
+    : lo + Math.random() * (hi - lo);
   const p = pointAt(s);
   const off = (Math.random() * 2 - 1) * Math.max(0, HALF_W - margin);
   return { x: p.x - Math.sin(p.angle) * off, y: p.y + Math.cos(p.angle) * off };
@@ -206,10 +225,8 @@ export const BRIDGES = [
   { name: '제6보도교', s: BRIDGE6_S, kind: 'white' as const },
 ];
 
-export const GATES = [
-  { name: '', s: PLAY_START_S },
-  { name: '차단 그물', s: PLAY_END_S },
-];
+// 위쪽 끝(제4보도교)에는 부표 줄이 쳐져 있다. 아래쪽은 바다로 열려 있다.
+export const GATES = [{ name: '', s: PLAY_START_S }];
 
 export const WORLD = { minX: -400, minY: 300, maxX: 2400, maxY: SEA_Y + 900 };
 
@@ -265,8 +282,8 @@ function labelBeside(s: number, text: string, side: 1 | -1): MapLabel {
 export const LABELS: MapLabel[] = [
   labelBeside(BRIDGE4_S, '제4보도교', 1),
   labelBeside(BRIDGE5_S, '제5보도교', 1),
-  labelBeside(PLAY_END_S, '차단 그물', 1),
-  labelBeside(BRIDGE6_S, '제6보도교 · 바다 출구', 1),
+  labelBeside(EXIT_S - 160, '🌊 외해 출구', 1),
+  labelBeside(BRIDGE6_S, '제6보도교', 1),
   { text: '어디야', x: SHOP.x + SHOP.w / 2 + 26, y: SHOP.y + SHOP.h * 0.2 + 12, sign: 'title' },
   { text: 'COFFEE', x: SHOP.x + SHOP.w / 2 + 26, y: SHOP.y + SHOP.h * 0.2 + 36, sign: 'sub' },
   { text: '', x: SHOP.x + SHOP.w / 2, y: SHOP.y - 26, dynamic: 'cups' },
@@ -310,7 +327,7 @@ function buildCrowd(): Spectator[] {
     const s =
       crowd.length < 14
         ? startS + (rnd() - 0.5) * 1000
-        : PLAY_START_S - 250 + rnd() * (PLAY_END_S - PLAY_START_S + 500);
+        : PLAY_START_S - 250 + rnd() * (SPAWN_END_S - PLAY_START_S + 250);
     if (BRIDGES.some((b) => Math.abs(b.s - s) < 130)) continue;
     const p = pointAt(s);
     const side = rnd() < 0.5 ? -1 : 1;

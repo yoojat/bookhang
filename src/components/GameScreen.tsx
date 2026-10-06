@@ -5,9 +5,10 @@ import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-na
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { GAME, ItemKind } from '../game/config';
-import { createGame, crowdSize, cupsSold, resetGame, resetPaused, setJoystick, updateGame, visitorsFor } from '../game/engine';
-import { LABELS } from '../game/map';
+import { answerExit, createGame, crowdSize, cupsSold, resetGame, resetPaused, setJoystick, updateGame, visitorsFor } from '../game/engine';
+import { EXIT_S, LABELS, nearestPlay } from '../game/map';
 import { renderGame } from '../game/render';
+import EndingCard, { EscapeHow } from './EndingCard';
 
 interface Frame {
   picture: SkPicture;
@@ -16,6 +17,8 @@ interface Frame {
   zoom: number;
   time: number;
   playTime: number;
+  // 바다 출구까지 남은 거리(미터로 환산)
+  exitMeters: number;
 }
 
 interface Hud {
@@ -23,6 +26,7 @@ interface Hud {
   lives: number;
   over: boolean;
   people: number;
+  escaped: EscapeHow | null;
 }
 
 export default function GameScreen() {
@@ -30,34 +34,42 @@ export default function GameScreen() {
   // 게임 상태는 매 프레임 바뀌므로 React state 가 아니라 변경 가능한 객체에 둔다.
   const [game] = useState(() => createGame(width, height));
   const [frame, setFrame] = useState<Frame | null>(null);
-  const [hud, setHud] = useState<Hud>({ score: 0, lives: GAME.lives, over: false, people: crowdSize(0) });
+  const [hud, setHud] = useState<Hud>({ score: 0, lives: GAME.lives, over: false, people: crowdSize(0), escaped: null });
   // 방금 늘어난 구경꾼 수를 잠깐 보여준다.
   const [gain, setGain] = useState({ n: 0, until: 0 });
   // 생닭이 날아올 때 잠깐 띄우는 안내
   const [toast, setToast] = useState({ text: '', until: 0 });
   // 카페인 부스트가 끝나는 게임 시각
   const [boostUntil, setBoostUntil] = useState(0);
+  // 만조가 끝나는 게임 시각
+  const [tideUntil, setTideUntil] = useState(0);
   // 최고 기록과 방금 끝난 판의 결과
   const bestRef = useRef(0);
-  const [result, setResult] = useState({ best: 0, isNew: false });
+  const [result, setResult] = useState({ best: 0, prev: 0, isNew: false });
+  // "바다로 나갈까요?" 질문이 떠 있는지
+  const [exitPrompt, setExitPrompt] = useState(false);
   const [screen, setScreen] = useState<'title' | 'play'>('play');
 
   const restart = useCallback(() => {
     resetGame(game, width, height);
-    setHud({ score: 0, lives: GAME.lives, over: false, people: crowdSize(0) });
+    setHud({ score: 0, lives: GAME.lives, over: false, people: crowdSize(0), escaped: null });
     setGain({ n: 0, until: 0 });
     setToast({ text: '', until: 0 });
     setBoostUntil(0);
+    setTideUntil(0);
+    setExitPrompt(false);
     setScreen('play');
   }, [game, width, height]);
 
   // 그만하기: 새 판을 준비해 두고 시작 화면에서 멈춘다.
   const quit = useCallback(() => {
     resetPaused(game, width, height);
-    setHud({ score: 0, lives: GAME.lives, over: false, people: crowdSize(0) });
+    setHud({ score: 0, lives: GAME.lives, over: false, people: crowdSize(0), escaped: null });
     setGain({ n: 0, until: 0 });
     setToast({ text: '', until: 0 });
     setBoostUntil(0);
+    setTideUntil(0);
+    setExitPrompt(false);
     setScreen('title');
   }, [game, width, height]);
 
@@ -68,7 +80,7 @@ export default function GameScreen() {
     const events = {
       onEat: (_score: number, people: number) => {
         const g = game;
-        setHud({ score: g.score, lives: g.lives, over: g.over, people: g.crowd.shown });
+        setHud({ score: g.score, lives: g.lives, over: g.over, people: g.crowd.shown, escaped: g.escaped });
         if (people > 0) setGain({ n: people, until: game.time + 1.1 });
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       },
@@ -84,18 +96,34 @@ export default function GameScreen() {
         setBoostUntil(until);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       },
+      onExitPrompt: () => setExitPrompt(true),
+      onNet: () =>
+        setToast({ text: '🪢 그물 몰이 시작! 두 배 사이 빈틈으로 빠져나가세요', until: game.time + 3.4 }),
+      onTide: (until: number) => {
+        setTideUntil(until);
+        setToast({ text: '🌊 만조! 지금은 그물을 넘을 수 있어요', until: game.time + 3 });
+      },
+      onEscape: (how: EscapeHow) => {
+        const g = game;
+        setHud({ score: g.score, lives: g.lives, over: g.over, people: g.crowd.shown, escaped: how });
+        const prev = bestRef.current;
+        bestRef.current = Math.max(prev, g.score);
+        setResult({ best: bestRef.current, prev, isNew: g.score > prev });
+        setExitPrompt(false);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      },
       onHeal: () => {
-        setHud({ score: game.score, lives: game.lives, over: game.over, people: game.crowd.shown });
+        setHud({ score: game.score, lives: game.lives, over: game.over, people: game.crowd.shown, escaped: game.escaped });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       },
       onHurt: () => {
         const g = game;
-        setHud({ score: g.score, lives: g.lives, over: g.over, people: g.crowd.shown });
+        setHud({ score: g.score, lives: g.lives, over: g.over, people: g.crowd.shown, escaped: g.escaped });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
         if (g.over) {
           const prev = bestRef.current;
           bestRef.current = Math.max(prev, g.score);
-          setResult({ best: bestRef.current, isNew: g.score > prev });
+          setResult({ best: bestRef.current, prev, isNew: g.score > prev });
         }
       },
     };
@@ -105,7 +133,16 @@ export default function GameScreen() {
       last = now;
       const g = game;
       updateGame(g, dt, events);
-      setFrame({ picture: renderGame(g), camX: g.camera.x, camY: g.camera.y, zoom: g.zoom, time: g.time, playTime: g.playTime });
+      const exitMeters = Math.max(0, EXIT_S - nearestPlay(g.shark.x, g.shark.y).s) * 0.1;
+      setFrame({
+        picture: renderGame(g),
+        camX: g.camera.x,
+        camY: g.camera.y,
+        zoom: g.zoom,
+        time: g.time,
+        playTime: g.playTime,
+        exitMeters,
+      });
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -168,6 +205,9 @@ export default function GameScreen() {
         {frame && frame.time < boostUntil && (
           <Text style={styles.boost}>⚡ 카페인 부스트 {Math.ceil(boostUntil - frame.time)}초</Text>
         )}
+        {frame && frame.time < tideUntil && (
+          <Text style={styles.tide}>🌊 만조 {Math.ceil(tideUntil - frame.time)}초 · 그물을 넘을 수 있어요</Text>
+        )}
         <Text style={styles.visitors}>
           👥 구경꾼 {hud.people}명
           {frame && frame.time < gain.until && <Text style={styles.gain}>  +{gain.n}</Text>}
@@ -180,6 +220,60 @@ export default function GameScreen() {
         <View style={styles.toast} pointerEvents="none">
           <Text style={styles.toastText}>{toast.text}</Text>
         </View>
+      )}
+
+      {frame && !hud.over && !hud.escaped && screen === 'play' && (
+        <View style={styles.exitPill} pointerEvents="none">
+          <Text style={styles.exitText}>🌊 외해 출구까지 {Math.round(frame.exitMeters)}m ↓</Text>
+        </View>
+      )}
+
+      {exitPrompt && !hud.over && !hud.escaped && (
+        <View style={styles.overlay}>
+          <View style={styles.card}>
+            <Text style={styles.cardEmoji}>🌊</Text>
+            <Text style={styles.cardTitle}>바다로 나갈까요?</Text>
+            <Text style={styles.cardSub}>
+              넓은 바다로 나가면 이번 판이 끝나고 엔딩을 볼 수 있어요.{'\n'}더 머물면서 점수를 올릴 수도 있어요.
+            </Text>
+            <Text style={styles.ask}>현재 점수 {hud.score}</Text>
+            <View style={styles.buttons}>
+              <Pressable
+                style={[styles.button, styles.buttonGhost]}
+                onPress={() => {
+                  setExitPrompt(false);
+                  answerExit(game, false);
+                }}>
+                <Text style={styles.buttonGhostText}>더 머물기</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.button, styles.buttonMain]}
+                onPress={() => {
+                  setExitPrompt(false);
+                  answerExit(game, true);
+                }}>
+                <Text style={styles.buttonText}>바다로 나가기</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {hud.escaped && (
+        <EndingCard
+          how={hud.escaped}
+          score={hud.score}
+          days={days}
+          people={hud.people}
+          visitors={visitorsFor(hud.score)}
+          cups={cupsSold(hud.people)}
+          lives={hud.lives}
+          best={result.best}
+          prevBest={result.prev}
+          isNewBest={result.isNew}
+          onRetry={restart}
+          onQuit={quit}
+        />
       )}
 
       {hud.over && (
@@ -281,6 +375,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   toastText: { fontSize: 15, fontWeight: '900', color: '#2a3342' },
+  tide: { color: '#9fe3ff', fontSize: 14, fontWeight: '900', marginBottom: 2 },
+  exitPill: {
+    position: 'absolute',
+    bottom: 56,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(8,40,70,0.55)',
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+  },
+  exitText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
   boost: { color: '#ffd34a', fontSize: 15, fontWeight: '900', marginBottom: 2 },
   gain: { color: '#ffe066', fontWeight: '800' },
   label: {

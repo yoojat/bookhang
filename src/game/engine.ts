@@ -1,13 +1,15 @@
-import { CAFFEINE, CANNON, CHICKEN, difficulty, ItemKind, FISH, FishKind, GAME, SHARK } from './config';
+import { CAFFEINE, CANNON, CHICKEN, difficulty, ItemKind, NET, TIDE, FISH, FishKind, GAME, SHARK } from './config';
 import {
   constrain,
   CROWD,
+  EXIT_S,
   HALF_W,
   nearestPlay,
-  PLAY_END_S,
+  SPAWN_END_S,
   PLAY_START_S,
   playStartPoint,
   pointAt,
+  SEA_Y,
   SHOP,
   QUEUE_MAX,
   randomPlayPoint,
@@ -66,6 +68,21 @@ export interface Chicken {
   t: number;
 }
 
+// 그물 몰이 한 번: 두 배가 빈틈(gapOff 중심, 반폭 gapHalf)을 두고 그물을 끌며 수로를 따라 내려온다.
+export interface Net {
+  id: number;
+  // 그물의 현재 위치(누적 길이)와 속도
+  s: number;
+  speed: number;
+  t: number;
+  phase: number;
+  // 빈틈의 중심(수로 중심선에서 옆으로 떨어진 거리)과 반폭
+  gapOff: number;
+  gapHalf: number;
+  // 이미 하트를 깎았는지 (그물 하나당 한 번만 깎는다)
+  hit: boolean;
+}
+
 export interface GameState {
   // 화면 크기 (조이스틱/카메라 계산용)
   width: number;
@@ -103,6 +120,19 @@ export interface GameState {
   throwerTimer: number;
   // 카페인 부스트가 끝나는 게임 시각
   boostUntil: number;
+  // 그물 몰이와 만조
+  nets: Net[];
+  netTimer: number;
+  tideUntil: number;
+  tideTimer: number;
+  // 바다로 나갔는지: 스스로 나갔는지(swam), 그물에 몰려 나갔는지(netted)
+  escaped: null | 'swam' | 'netted';
+  // 출구 앞에서 "바다로 나갈까요?"를 묻는 중인지, 플레이어의 대답, 거절 뒤 잠시 출구를 막는 시각
+  exitPrompt: boolean;
+  exitAnswer: null | 'go' | 'stay';
+  exitCooldown: number;
+  // 마지막으로 그물에 밀린 게임 시각
+  pushedAt: number;
   score: number;
   lives: number;
   over: boolean;
@@ -122,6 +152,12 @@ export interface GameEvents {
   onThrow: (kind: ItemKind) => void;
   // 아이스 아메리카노를 마셔서 카페인 부스트가 시작됐을 때(끝나는 게임 시각)
   onBoost: (until: number) => void;
+  // 그물 몰이가 시작됐을 때 / 만조가 시작됐을 때(끝나는 게임 시각) / 바다로 나갔을 때
+  onNet: () => void;
+  onTide: (until: number) => void;
+  onEscape: (how: 'swam' | 'netted') => void;
+  // 출구 앞에 도착해 "바다로 나갈까요?"를 물을 때
+  onExitPrompt: () => void;
 }
 
 const FISH_KINDS = Object.keys(FISH) as FishKind[];
@@ -141,7 +177,7 @@ function spawnFish(g: GameState, minDist: number) {
   const kind = pickKind();
   const spec = FISH[kind];
   for (let attempt = 0; attempt < 8; attempt++) {
-    const p = randomPlayPoint(spec.radius * 2);
+    const p = randomPlayPoint(spec.radius * 2, { s: nearestPlay(g.shark.x, g.shark.y).s, spread: 1500 });
     if (Math.hypot(p.x - g.shark.x, p.y - g.shark.y) < minDist) continue;
     g.fish.push({ id: g.nextId++, kind, x: p.x, y: p.y, angle: Math.random() * Math.PI * 2, wobble: Math.random() * 6 });
     return;
@@ -190,6 +226,15 @@ export function createGame(width: number, height: number): GameState {
     chickens: [],
     throwerTimer: CHICKEN.firstDelay,
     boostUntil: 0,
+    nets: [],
+    netTimer: NET.firstDelay,
+    tideUntil: 0,
+    tideTimer: TIDE.first,
+    escaped: null,
+    exitPrompt: false,
+    exitAnswer: null,
+    exitCooldown: 0,
+    pushedAt: -99,
     score: 0,
     lives: GAME.lives,
     over: false,
@@ -204,6 +249,11 @@ export function createGame(width: number, height: number): GameState {
   for (let i = 0; i < g.queue.shown; i++) g.queue.appear.push(-10);
   for (let i = 0; i < GAME.maxFish; i++) spawnFish(g, 300);
   return g;
+}
+
+// 출구 질문에 대한 대답: 다음 프레임에 처리된다.
+export function answerExit(g: GameState, go: boolean) {
+  g.exitAnswer = go ? 'go' : 'stay';
 }
 
 // 같은 객체를 유지한 채 처음 상태로 되돌린다.
@@ -245,7 +295,7 @@ function spawnShot(g: GameState) {
   const near = nearestPlay(s.x, s.y);
   const dir = Math.random() < 0.5 ? -1 : 1;
   const dist = 300 + Math.random() * 150;
-  const sStation = Math.min(PLAY_END_S - 100, Math.max(PLAY_START_S + 100, near.s + dir * dist));
+  const sStation = Math.min(SPAWN_END_S - 100, Math.max(PLAY_START_S + 100, near.s + dir * dist));
   const sFrom = Math.min(TOTAL_LENGTH - 40, Math.max(40, sStation + dir * 650));
   const d = difficulty(g.time);
   const shot: Shot = {
@@ -312,6 +362,87 @@ export function resetPaused(g: GameState, width: number, height: number) {
   g.paused = true;
 }
 
+// 상어의 위치를 수로 기준 좌표(누적 길이 s, 중심선에서 옆으로 떨어진 거리 off)로 바꾼다.
+function sharkLane(g: GameState) {
+  const n = nearestPlay(g.shark.x, g.shark.y);
+  const p = pointAt(n.s);
+  const off = (g.shark.x - p.x) * -Math.sin(p.angle) + (g.shark.y - p.y) * Math.cos(p.angle);
+  return { s: n.s, off };
+}
+
+function placeInLane(g: GameState, s: number, off: number) {
+  const p = pointAt(s);
+  g.shark.x = p.x - Math.sin(p.angle) * off;
+  g.shark.y = p.y + Math.cos(p.angle) * off;
+}
+
+function spawnNet(g: GameState) {
+  const d = difficulty(g.time);
+  const lane = sharkLane(g);
+  g.nets.push({
+    id: g.nextId++,
+    // 상어 위쪽(화면 밖)에서 시작해 내려온다.
+    s: Math.max(PLAY_START_S - 150, lane.s - 1000),
+    speed: NET.speedStart + (NET.speedMax - NET.speedStart) * d,
+    t: 0,
+    phase: Math.random() * Math.PI * 2,
+    gapOff: 0,
+    gapHalf: NET.gapStart + (NET.gapMin - NET.gapStart) * d,
+    hit: false,
+  });
+}
+
+export function isHighTide(g: GameState) {
+  return g.time < g.tideUntil;
+}
+
+function updateNets(g: GameState, dt: number, events: GameEvents) {
+  const s = g.shark;
+  const d = difficulty(g.time);
+
+  // 만조: 일정 주기로 물이 차올라 그물을 넘을 수 있다.
+  g.tideTimer -= dt;
+  if (g.tideTimer <= 0) {
+    g.tideUntil = g.time + TIDE.duration;
+    g.tideTimer = TIDE.period;
+    events.onTide(g.tideUntil);
+  }
+
+  g.netTimer -= dt;
+  const maxNets = g.time >= NET.secondNetAfter ? 2 : 1;
+  if (g.time >= NET.firstDelay && g.netTimer <= 0 && g.nets.length < maxNets) {
+    spawnNet(g);
+    g.netTimer = NET.intervalStart + (NET.intervalMin - NET.intervalStart) * d;
+    events.onNet();
+  }
+
+  for (let i = g.nets.length - 1; i >= 0; i--) {
+    const net = g.nets[i];
+    net.t += dt;
+    net.s += net.speed * dt;
+    // 두 배는 빈틈을 좌우로 천천히 옮기며 상어를 따라 조정한다.
+    const amp = Math.max(0, HALF_W - 18 - net.gapHalf);
+    net.gapOff = Math.sin(net.t * (0.9 + 0.5 * d) + net.phase) * amp;
+    // 그물은 수로 끝을 지나 바다까지 상어를 몰고 나간다.
+    if (net.s > EXIT_S + 160) {
+      g.nets.splice(i, 1);
+      continue;
+    }
+
+    // 그물과 상어: 빈틈 밖에서 닿으면 하트가 깎이고, 그물에 밀려 아래로 몰린다.
+    const lane = sharkLane(g);
+    const half = NET.band / 2 + s.radius * 1.1;
+    const ds = lane.s - net.s;
+    if (Math.abs(ds) >= half) continue;
+    const inGap = Math.abs(lane.off - net.gapOff) < net.gapHalf - s.radius * 0.9;
+    if (inGap || isHighTide(g)) continue;
+    if (!net.hit && hurt(g, events)) net.hit = true;
+    if (g.over) continue;
+    placeInLane(g, net.s + (ds >= 0 ? half : -half), lane.off);
+    if (ds >= 0) g.pushedAt = g.time;
+  }
+}
+
 function normalizeAngle(a: number) {
   while (a > Math.PI) a -= Math.PI * 2;
   while (a < -Math.PI) a += Math.PI * 2;
@@ -357,7 +488,7 @@ function spawnThrower(g: GameState): ItemKind | null {
   const near = nearestPlay(s.x, s.y);
   for (let attempt = 0; attempt < 30; attempt++) {
     const side = Math.random() < 0.5 ? -1 : 1;
-    const cs = Math.min(PLAY_END_S - 80, Math.max(PLAY_START_S + 80, near.s + (Math.random() * 2 - 1) * 380));
+    const cs = Math.min(SPAWN_END_S - 80, Math.max(PLAY_START_S + 80, near.s + (Math.random() * 2 - 1) * 380));
     const p = pointAt(cs);
     const tx = p.x - Math.sin(p.angle) * side * (HALF_W + 62);
     const ty = p.y + Math.cos(p.angle) * side * (HALF_W + 62);
@@ -365,7 +496,7 @@ function spawnThrower(g: GameState): ItemKind | null {
 
     // 닭이 떨어질 곳: 상어 가까운 수면이면서 던지는 사람과 적당히 떨어진 곳
     for (let k = 0; k < 8; k++) {
-      const land = randomPlayPoint(60);
+      const land = randomPlayPoint(60, { s: near.s, spread: 700 });
       const ds = Math.hypot(land.x - s.x, land.y - s.y);
       const dt = Math.hypot(land.x - tx, land.y - ty);
       if (ds < CHICKEN.minDist || ds > CHICKEN.maxDist || dt < 150 || dt > 480) continue;
@@ -435,6 +566,8 @@ function updateThrower(g: GameState, dt: number, mouthX: number, mouthY: number,
 
 export function updateGame(g: GameState, dt: number, events: GameEvents) {
   if (g.paused) return;
+  // 출구 질문에 대답하기 전까지는 모든 것이 멈춘다.
+  if (g.exitPrompt && g.exitAnswer === null) return;
   g.time += dt;
   const s = g.shark;
 
@@ -451,8 +584,24 @@ export function updateGame(g: GameState, dt: number, events: GameEvents) {
   g.camera.x += (camX - g.camera.x) * follow;
   g.camera.y += (s.y - g.camera.y) * follow;
 
-  if (g.over) return;
+  if (g.over || g.escaped) return;
   g.playTime += dt;
+
+  if (g.exitPrompt) {
+    g.exitPrompt = false;
+    if (g.exitAnswer === 'go') {
+      g.exitAnswer = null;
+      g.escaped = 'swam';
+      events.onEscape('swam');
+      return;
+    }
+    // 더 머물기: 출구에서 조금 되돌려 놓고, 잠시 출구를 막아 곧바로 다시 묻지 않게 한다.
+    g.exitAnswer = null;
+    const back = sharkLane(g);
+    placeInLane(g, EXIT_S - 420, back.off);
+    s.speed = 0;
+    g.exitCooldown = g.time + 2.5;
+  }
 
   // --- 조이스틱 입력 -> 상어 이동 ---
   const boosted = g.time < g.boostUntil;
@@ -486,6 +635,30 @@ export function updateGame(g: GameState, dt: number, events: GameEvents) {
 
   updateShots(g, dt, events);
   if (g.over) return;
+  updateNets(g, dt, events);
+  if (g.over) return;
+
+  // 출구 앞: 스스로 가면 "바다로 나갈까요?"를 묻고, 그물에 몰려 나가면 묻지 않는다.
+  const exitLane = sharkLane(g);
+  if (exitLane.s > EXIT_S - 200) {
+    if (g.time - g.pushedAt < 1.2) {
+      if (s.y > SEA_Y + 30) {
+        g.escaped = 'netted';
+        events.onEscape('netted');
+        return;
+      }
+    } else if (g.time < g.exitCooldown) {
+      placeInLane(g, EXIT_S - 200, exitLane.off);
+      s.speed = 0;
+    } else {
+      g.exitPrompt = true;
+      g.exitAnswer = null;
+      g.joystick.active = false;
+      s.speed = 0;
+      events.onExitPrompt();
+      return;
+    }
+  }
 
   // --- 물고기 스폰 (화면 밖에서만) ---
   g.spawnTimer -= dt;

@@ -95,6 +95,32 @@ function circle(canvas: SkCanvas, cx: number, cy: number, r: number, color: stri
   if (ow > 0) canvas.drawCircle(cx, cy, r, outline(ow));
 }
 
+// 그물을 끄는 작업선: 주황색 선체에 선원이 타고 있다. f: 바라보는 방향
+export function drawNetBoat(canvas: SkCanvas, x: number, y: number, f: 1 | -1, time: number) {
+  const bob = Math.sin(time * 3 + x * 0.05) * 2;
+  const by = y + bob;
+  oval(canvas, x - 56, by + 8, 112, 14, 'rgba(0,50,80,0.18)', 0);
+
+  canvas.save();
+  canvas.translate(x, by);
+  canvas.scale(f, 1);
+  poly(canvas, [[-48, -6], [52, -6], [66, -14], [42, 12], [-40, 12]], '#ff9a3c');
+  poly(canvas, [[-48, -6], [52, -6], [62, -11], [-47, -1]], '#ffffff', 0);
+  poly(canvas, [[-40, -32], [-8, -32], [-8, -6], [-40, -6]], '#ffffff');
+  circle(canvas, -24, -19, 5.5, '#8fd3e8', 2.2);
+  // 그물을 감는 윈치
+  circle(canvas, 32, -13, 7.5, '#6c7480', 2.4);
+  canvas.drawLine(32, -13, 32, -20, outline(2.4));
+  canvas.restore();
+
+  canvas.drawOval(Skia.XYWHRect(x - 52, by + 6, 104, 10), stroke('rgba(255,255,255,0.9)', 3, true));
+  canvas.drawOval(Skia.XYWHRect(x - 64, by + 3, 128, 16), stroke('rgba(255,255,255,0.4)', 2, true));
+
+  CREW.x = x + f * 8;
+  CREW.y = by - 6;
+  drawSpectator(canvas, CREW, time, -10, false, f, null, true);
+}
+
 // 대포에서 목표까지 이어지는 포물선 물줄기
 function jetPath(shot: Shot, muzzleX: number, muzzleY: number) {
   const mx = (muzzleX + shot.tx) / 2;

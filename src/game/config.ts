@@ -108,6 +108,31 @@ export const CAFFEINE = {
   cannonSlow: 0.55,
 };
 
+// 그물 몰이: 북항에서 실제로 배 두 척과 작업자들이 그물(길이 50m, 높이 6.8m)을 끌며 부캉이를 외해 쪽으로 몰았다.
+// 게임에서는 후반으로 갈수록 그물이 수로를 훑고 내려오고, 두 배 사이의 빈틈으로 빠져나가야 한다.
+export const NET = {
+  firstDelay: 40,
+  intervalStart: 32,
+  intervalMin: 14,
+  // 그물이 수로를 따라 내려오는 속도(월드 단위/초): 처음 -> 최고 난이도
+  speedStart: 80,
+  speedMax: 150,
+  // 그물 띠의 두께
+  band: 40,
+  // 두 배 사이 빈틈의 반폭: 처음 -> 최고 난이도
+  gapStart: 112,
+  gapMin: 72,
+  // 동시에 내려오는 그물 수는 이 시간(초) 이후 2개까지
+  secondNetAfter: 110,
+};
+
+// 만조: 물이 차오르면 그물이 가라앉아 넘을 수 있다. (실제로 부캉이도 만조 때 그물을 넘어 돌아왔다.)
+export const TIDE = {
+  first: 75,
+  period: 60,
+  duration: 9,
+};
+
 export const difficulty = (time: number) => Math.min(1, time / CANNON.rampSeconds);
 
 export const COLORS = {

@@ -11,14 +11,16 @@ import {
 } from '@shopify/react-native-skia';
 
 import { CHICKEN, COLORS, SHARK } from './config';
-import { GameState } from './engine';
+import { GameState, isHighTide } from './engine';
 import { drawShot } from './cannon';
+import { drawNet } from './net';
 import { fill, stroke } from './paint';
 import { drawChicken, drawCoffee, drawFish, drawShark, drawSpectator } from './sprites';
 import {
   BRIDGES,
   CANAL_WIDTH,
   CROWD,
+  EXIT_S,
   GATES,
   QUEUE,
   HALF_W,
@@ -315,6 +317,23 @@ function drawJoystick(canvas: SkCanvas, g: GameState) {
   canvas.drawCircle(j.ox + Math.cos(a) * m, j.oy + Math.sin(a) * m, 20, fill('rgba(255,255,255,0.45)'));
 }
 
+// 바다로 나가는 출구 표시: 수로 끝으로 이어지는 흰 화살표가 차례로 깜빡인다.
+function drawExitMarker(canvas: SkCanvas, g: GameState) {
+  const alphas = ['rgba(255,255,255,0.35)', 'rgba(255,255,255,0.65)', 'rgba(255,255,255,0.95)'];
+  for (let i = 0; i < 3; i++) {
+    const p = pointAt(EXIT_S - 230 + i * 56);
+    if (Math.abs(p.x - g.camera.x) > 700 || Math.abs(p.y - g.camera.y) > 1000) continue;
+    const lit = Math.floor(g.time * 3) % 3 === i;
+    const tx = Math.cos(p.angle);
+    const ty = Math.sin(p.angle);
+    const nx = -ty;
+    const ny = tx;
+    const paint = stroke(lit ? alphas[2] : alphas[0], 8, true);
+    canvas.drawLine(p.x - nx * 40 - tx * 22, p.y - ny * 40 - ty * 22, p.x + tx * 10, p.y + ty * 10, paint);
+    canvas.drawLine(p.x + nx * 40 - tx * 22, p.y + ny * 40 - ty * 22, p.x + tx * 10, p.y + ty * 10, paint);
+  }
+}
+
 // 상어가 이 거리 안으로 오면 구경꾼이 하트를 띄우며 좋아한다.
 const LOVE_DISTANCE = 330;
 
@@ -411,6 +430,8 @@ export function renderGame(g: GameState): SkPicture {
       for (const f of g.fish) drawFish(canvas, f, g.time);
       drawShark(canvas, g);
       drawChickens(canvas, g, true);
+      for (const net of g.nets) drawNet(canvas, net, g.time, isHighTide(g));
+      drawExitMarker(canvas, g);
       for (const shot of g.shots) drawShot(canvas, shot);
       // 다리와 그물은 상어 위로 지나간다.
       canvas.drawPicture(front);
