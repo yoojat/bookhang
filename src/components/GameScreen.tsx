@@ -41,7 +41,12 @@ export default function GameScreen() {
   const [size, setSize] = useState({ width: win.width, height: win.height });
   const { width, height } = size;
   // 게임 상태는 매 프레임 바뀌므로 React state 가 아니라 변경 가능한 객체에 둔다.
-  const [game] = useState(() => createGame(win.width, win.height));
+  const [game] = useState(() => {
+    // 시작 화면이 떠 있는 동안에는 진행을 멈춰 둔다.
+    const g = createGame(win.width, win.height);
+    g.paused = true;
+    return g;
+  });
   const [frame, setFrame] = useState<Frame | null>(null);
   const [hud, setHud] = useState<Hud>({ score: 0, lives: GAME.lives, over: false, people: crowdSize(0), escaped: null });
   // 방금 늘어난 구경꾼 수를 잠깐 보여준다.
@@ -57,7 +62,7 @@ export default function GameScreen() {
   const [result, setResult] = useState({ best: 0, prev: 0, isNew: false });
   // "바다로 나갈까요?" 질문이 떠 있는지
   const [exitPrompt, setExitPrompt] = useState(false);
-  const [screen, setScreen] = useState<'title' | 'play'>('play');
+  const [screen, setScreen] = useState<'title' | 'play'>('title');
 
   const restart = useCallback(() => {
     resetGame(game, width, height);
@@ -368,6 +373,14 @@ export default function GameScreen() {
           <Text style={styles.titleEmoji}>🦈</Text>
           <Text style={styles.titleName}>북항이</Text>
           <Text style={styles.titleSub}>북항 친수공원 수로에 갇힌 아기 상어{'\n'}배고픈 북항이를 도와주세요!</Text>
+          <View style={styles.howto}>
+            <Text style={styles.howtoGoal}>🎯 목표: 높은 점수를 모으고 바다로 탈출하기!</Text>
+            <Text style={styles.howtoLine}>👆 화면을 누른 채 드래그하면 북항이가 움직여요</Text>
+            <Text style={styles.howtoLine}>🐟 물고기를 먹으면 점수! 멸치 10점 · 숭어 30점</Text>
+            <Text style={styles.howtoLine}>🚤 물대포, 🪢 그물, 🔦 밤의 불빛은 피하세요 (하트가 깎여요)</Text>
+            <Text style={styles.howtoLine}>🐔 생닭은 하트 +1 · ☕ 커피는 10초 동안 빨라져요</Text>
+            <Text style={styles.howtoLine}>🌊 수로 끝 외해 출구에 닿으면 탈출! 점수가 높을수록 좋아요</Text>
+          </View>
           {result.best > 0 && <Text style={styles.titleBest}>🏆 최고 기록 {result.best}</Text>}
           <Pressable style={[styles.button, styles.buttonMain, styles.startButton]} onPress={restart}>
             <Text style={styles.buttonText}>게임 시작</Text>
@@ -500,6 +513,17 @@ const styles = StyleSheet.create({
   titleEmoji: { fontSize: 72 },
   titleName: { fontSize: 56, fontWeight: '900', color: '#ffffff', letterSpacing: 4, marginTop: 4 },
   titleSub: { fontSize: 16, color: 'rgba(255,255,255,0.9)', textAlign: 'center', marginTop: 10, lineHeight: 24 },
+  howto: {
+    marginTop: 20,
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 6,
+  },
+  howtoGoal: { color: '#ffe066', fontSize: 16, fontWeight: '900', marginBottom: 4 },
+  howtoLine: { color: 'rgba(255,255,255,0.92)', fontSize: 13, lineHeight: 19 },
   titleBest: { marginTop: 18, fontSize: 18, fontWeight: '800', color: '#ffe066' },
-  startButton: { flex: 0, alignSelf: 'stretch', marginTop: 32, marginHorizontal: 40 },
+  startButton: { flex: 0, alignSelf: 'stretch', marginTop: 22, marginHorizontal: 40 },
 });

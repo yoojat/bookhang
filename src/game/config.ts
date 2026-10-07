@@ -36,10 +36,10 @@ export const GAME = {
   shopViewExtra: 230,
   fleeDistance: 170,
   spawnInterval: 0.45,
-  lives: 3,
+  lives: 5,
   // 생닭으로 늘릴 수 있는 최대 라이프
-  maxLives: 5,
-  invulnerableSeconds: 1.5,
+  maxLives: 7,
+  invulnerableSeconds: 2.2,
   // 구경꾼: 기본 인원 + 점수 N점마다 1명. 사람 한 명이 방문객 수 몇 명을 나타내는지도 정한다.
   crowdBase: 0,
   // 게임 속 하루: 플레이 시간 이만큼(초)이 지날 때마다 북항 체류일이 하루 늘어난다.
@@ -52,36 +52,36 @@ export const GAME = {
 };
 
 // 물대포: 북항에서 실제로 배 위에서 물줄기를 쏘며 부캉이를 외해로 유도하려 한 일에서 따왔다.
-// 난이도는 게임 시간에 따라 올라간다. (임시 값, 추후 조정)
+// 난이도는 게임 시간에 따라 올라간다. (피드백 반영: 쉽게 조정함)
 export const CANNON = {
   radius: 80,
   // 조준(경고) 시간: 처음 -> 최소
-  aimStart: 1.5,
-  aimMin: 0.75,
+  aimStart: 2.2,
+  aimMin: 1.1,
   // 발사 직전 이 시간 동안은 목표가 고정되어 피해야 한다.
-  lockTime: 0.5,
+  lockTime: 0.6,
   // 배가 목표 위치로 들어오는 시간 / 쏜 뒤 빠져나가는 시간
   arriveTime: 1.4,
   leaveTime: 1.2,
   // 발사하는 동안(약 1초) 물줄기가 상어를 따라온다. fireFollow 가 클수록 빨리 따라붙는다.
   fireTime: 1.0,
-  fireFollow: 2.2,
+  fireFollow: 1.6,
   // 발사 간격: 처음 -> 최소
-  intervalStart: 4.5,
-  intervalMin: 1.6,
-  firstDelay: 5,
+  intervalStart: 6.5,
+  intervalMin: 2.8,
+  firstDelay: 12,
   // 이 시간(초)에 최고 난이도에 도달
-  rampSeconds: 150,
+  rampSeconds: 300,
   // 동시에 존재할 수 있는 물대포 수는 이 시간(초)마다 하나씩 늘어난다.
-  extraEverySeconds: 60,
+  extraEverySeconds: 120,
   maxShots: 3,
 };
 
 // 생닭 던지는 사람: 가끔 기슭에 나타나 수로로 생닭을 던진다. 먹으면 라이프가 하나 오른다.
 export const CHICKEN = {
   firstDelay: 7,
-  intervalMin: 16,
-  intervalMax: 24,
+  intervalMin: 12,
+  intervalMax: 18,
   // 사람이 등장해서 던질 때까지 / 퇴장할 때까지 (초)
   throwAt: 1.4,
   leaveAt: 3.4,
@@ -111,24 +111,24 @@ export const CAFFEINE = {
 // 그물 몰이: 북항에서 실제로 배 두 척과 작업자들이 그물(길이 50m, 높이 6.8m)을 끌며 부캉이를 외해 쪽으로 몰았다.
 // 게임에서는 후반으로 갈수록 그물이 수로를 훑고 내려오고, 두 배 사이의 빈틈으로 빠져나가야 한다.
 export const NET = {
-  firstDelay: 40,
-  intervalStart: 32,
-  intervalMin: 14,
+  firstDelay: 70,
+  intervalStart: 38,
+  intervalMin: 20,
   // 그물이 수로를 따라 내려오는 속도(월드 단위/초): 처음 -> 최고 난이도
-  speedStart: 80,
-  speedMax: 150,
+  speedStart: 65,
+  speedMax: 120,
   // 그물 띠의 두께
   band: 52,
   // 두 배 사이 빈틈의 반폭: 처음 -> 최고 난이도
-  gapStart: 112,
-  gapMin: 72,
+  gapStart: 135,
+  gapMin: 100,
   // 동시에 내려오는 그물 수는 이 시간(초) 이후 2개까지
-  secondNetAfter: 110,
+  secondNetAfter: 200,
 };
 
 // 만조: 물이 차오르면 그물이 가라앉아 넘을 수 있다. (실제로 부캉이도 만조 때 그물을 넘어 돌아왔다.)
 export const TIDE = {
-  first: 75,
+  first: 60,
   period: 60,
   duration: 9,
 };
@@ -170,12 +170,12 @@ export const LAMP = {
   arrive: 0.8,
   // 손전등: 좁고 빠르게 쫓아온다 / 대형 랜턴: 넓지만 느리다.
   // range: 불빛이 닿는 최대 거리(월드 단위). 기슭에서 수로 한가운데 근처까지만 비추고, 그보다 멀면 쫓아가지 않는다.
-  flash: { half: 0.17, follow: 2.0, need: 1.1, range: 330 },
-  lantern: { half: 0.36, follow: 1.0, need: 1.6, range: 290 },
+  flash: { half: 0.17, follow: 1.6, need: 1.8, range: 330 },
+  lantern: { half: 0.36, follow: 0.8, need: 2.4, range: 290 },
   // 불빛에 이만큼(초) 계속 비치면 하트가 하나 깎인다. (위 need 참고) 비치지 않으면 이 배율로 빠르게 회복한다.
   recover: 1.6,
   // 두 번째 사람부터는 이 체류일(일) 이후에 함께 나타난다.
-  secondAfterDays: 1,
+  secondAfterDays: 2,
 };
 
 export const difficulty = (time: number) => Math.min(1, time / CANNON.rampSeconds);
