@@ -7,9 +7,14 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.yoojat.bukhangi",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.yoojat.bukhangi",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -19,7 +24,25 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
-    }
+      "favicon": "./assets/favicon.png",
+      "output": "single",
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#9fe0ff",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 220
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "b8f48af9-c6a9-4ae0-8202-feda4fa99262"
+      }
+    },
+    "owner": "yoojaty"
   }
 }

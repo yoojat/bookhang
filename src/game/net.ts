@@ -41,8 +41,8 @@ export function drawNet(canvas: SkCanvas, net: Net, time: number, highTide: bool
     [net.gapOff + net.gapHalf, edge],
   ];
   // 만조에는 그물이 물에 잠겨 흐릿하게 보인다.
-  const body = highTide ? 'rgba(235,245,250,0.16)' : 'rgba(235,245,250,0.34)';
-  const mesh = highTide ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.6)';
+  const body = highTide ? 'rgba(235,245,250,0.16)' : 'rgba(235,245,250,0.5)';
+  const mesh = highTide ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.85)';
   const rope = highTide ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.95)';
 
   for (const [a, b] of segments) {
@@ -62,24 +62,24 @@ export function drawNet(canvas: SkCanvas, net: Net, time: number, highTide: bool
     for (let o = a; o <= b; o += 18) {
       const u = at(o, -half);
       const v = at(o, half);
-      canvas.drawLine(u.x, u.y, v.x, v.y, stroke(mesh, 2, true));
+      canvas.drawLine(u.x, u.y, v.x, v.y, stroke(mesh, 2.6, true));
     }
     for (const along of [-half, 0, half]) {
       const u = at(a, along);
       const v = at(b, along);
-      canvas.drawLine(u.x, u.y, v.x, v.y, stroke(rope, along === 0 ? 4 : 2.4, true));
+      canvas.drawLine(u.x, u.y, v.x, v.y, stroke(rope, along === 0 ? 6 : 3.2, true));
     }
     // 위쪽 줄에 달린 주황 부표
     for (let o = a + 14; o < b; o += 40) {
       const u = at(o, 0);
-      canvas.drawCircle(u.x, u.y, 6.5, fill('#ff8a3d'));
-      canvas.drawCircle(u.x, u.y, 6.5, stroke('#2a3342', 2, true));
+      canvas.drawCircle(u.x, u.y, 8.5, fill('#ff8a3d'));
+      canvas.drawCircle(u.x, u.y, 8.5, stroke('#2a3342', 2.4, true));
     }
   }
 
   // 빈틈 양쪽의 작업선
-  const boatA = at(net.gapOff - net.gapHalf - 52);
-  const boatB = at(net.gapOff + net.gapHalf + 52);
+  const boatA = at(net.gapOff - net.gapHalf - 34);
+  const boatB = at(net.gapOff + net.gapHalf + 34);
   drawNetBoat(canvas, boatA.x, boatA.y, 1, time);
   drawNetBoat(canvas, boatB.x, boatB.y, -1, time);
 

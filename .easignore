@@ -42,3 +42,8 @@ yarn-error.*
 
 # 스크린샷 원본(용량이 커서 제외)
 store/raw/
+
+# EAS 업로드에서 제외 (앱 빌드에 필요 없는 것들)
+store/
+scripts/
+public/

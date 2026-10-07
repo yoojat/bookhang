@@ -1,13 +1,14 @@
 import { Canvas, Picture, SkPicture } from '@shopify/react-native-skia';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
-import { GAME, ItemKind } from '../game/config';
-import { answerExit, createGame, crowdSize, cupsSold, resetGame, resetPaused, setJoystick, updateGame, visitorsFor } from '../game/engine';
-import { EXIT_S, LABELS, nearestPlay } from '../game/map';
+import { dayInfo, DayPhase, GAME, ItemKind } from '../game/config';
+import { answerExit, createGame, crowdSize, cupsSold, resetGame, resizeGame, resetPaused, setJoystick, updateGame, visitorsFor } from '../game/engine';
+import { BRIDGE4_S, EXIT_S, LABELS, nearestPlay, pointAt } from '../game/map';
 import { renderGame } from '../game/render';
+import { loadBest, saveBest } from '../game/storage';
 import EndingCard, { EscapeHow } from './EndingCard';
 
 interface Frame {
@@ -19,6 +20,8 @@ interface Frame {
   playTime: number;
   // 바다 출구까지 남은 거리(미터로 환산)
   exitMeters: number;
+  // 하루 중 때(낮/해질녘/밤/새벽)
+  phase: DayPhase;
 }
 
 interface Hud {
@@ -29,10 +32,16 @@ interface Hud {
   escaped: EscapeHow | null;
 }
 
+const phaseLabel = (p: DayPhase) =>
+  p === 'day' ? '☀️ 낮' : p === 'dusk' ? '🌆 해질녘' : p === 'night' ? '🌙 밤' : '🌅 새벽';
+
 export default function GameScreen() {
-  const { width, height } = useWindowDimensions();
+  // 게임 영역의 실제 크기: 웹에서는 창보다 좁은 세로 칸에 들어가므로 레이아웃으로 알아낸다.
+  const win = useWindowDimensions();
+  const [size, setSize] = useState({ width: win.width, height: win.height });
+  const { width, height } = size;
   // 게임 상태는 매 프레임 바뀌므로 React state 가 아니라 변경 가능한 객체에 둔다.
-  const [game] = useState(() => createGame(width, height));
+  const [game] = useState(() => createGame(win.width, win.height));
   const [frame, setFrame] = useState<Frame | null>(null);
   const [hud, setHud] = useState<Hud>({ score: 0, lives: GAME.lives, over: false, people: crowdSize(0), escaped: null });
   // 방금 늘어난 구경꾼 수를 잠깐 보여준다.
@@ -73,6 +82,23 @@ export default function GameScreen() {
     setScreen('title');
   }, [game, width, height]);
 
+  // 저장해 둔 최고 기록을 불러온다.
+  useEffect(() => {
+    loadBest().then((best) => {
+      if (best > bestRef.current) {
+        bestRef.current = best;
+        setResult((r) => ({ ...r, best }));
+      }
+    });
+  }, []);
+
+  // 웹에서 주소 끝에 ?debug 를 붙이면 게임 상태를 꺼내 볼 수 있게 한다. (스크린샷 촬영, 점검용)
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    if (!window.location.search.includes('debug')) return;
+    (window as unknown as Record<string, unknown>).__bk = { game, pointAt, nearestPlay, EXIT_S, BRIDGE4_S };
+  }, [game]);
+
   useEffect(() => {
     let raf = 0;
     let last = performance.now();
@@ -97,6 +123,17 @@ export default function GameScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       },
       onExitPrompt: () => setExitPrompt(true),
+      onPhase: (phase: DayPhase) => {
+        const text =
+          phase === 'dusk'
+            ? '🌆 해가 지고 있어요'
+            : phase === 'night'
+              ? '🌙 밤이에요! 기슭의 불빛에 오래 비치면 하트가 깎여요. 다리 밑은 안전해요'
+              : phase === 'dawn'
+                ? '🌅 날이 밝아 와요'
+                : '';
+        if (text) setToast({ text, until: game.time + 3.6 });
+      },
       onNet: () =>
         setToast({ text: '🪢 그물 몰이 시작! 두 배 사이 빈틈으로 빠져나가세요', until: game.time + 3.4 }),
       onTide: (until: number) => {
@@ -109,6 +146,7 @@ export default function GameScreen() {
         const prev = bestRef.current;
         bestRef.current = Math.max(prev, g.score);
         setResult({ best: bestRef.current, prev, isNew: g.score > prev });
+        if (g.score > prev) saveBest(g.score);
         setExitPrompt(false);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       },
@@ -124,6 +162,7 @@ export default function GameScreen() {
           const prev = bestRef.current;
           bestRef.current = Math.max(prev, g.score);
           setResult({ best: bestRef.current, prev, isNew: g.score > prev });
+          if (g.score > prev) saveBest(g.score);
         }
       },
     };
@@ -142,6 +181,7 @@ export default function GameScreen() {
         time: g.time,
         playTime: g.playTime,
         exitMeters,
+        phase: dayInfo(g.playTime).phase,
       });
       raf = requestAnimationFrame(loop);
     };
@@ -168,7 +208,15 @@ export default function GameScreen() {
   const days = frame ? Math.floor(frame.playTime / GAME.secondsPerDay) : 0;
 
   return (
-    <View style={styles.root}>
+    <View
+      style={styles.root}
+      onLayout={(e) => {
+        const { width: w, height: h } = e.nativeEvent.layout;
+        if (w > 0 && h > 0 && (w !== width || h !== height)) {
+          setSize({ width: w, height: h });
+          resizeGame(game, w, h);
+        }
+      }}>
       <GestureDetector gesture={pan}>
         <View style={StyleSheet.absoluteFill}>
           <Canvas style={StyleSheet.absoluteFill}>{frame && <Picture picture={frame.picture} />}</Canvas>
@@ -213,7 +261,10 @@ export default function GameScreen() {
           {frame && frame.time < gain.until && <Text style={styles.gain}>  +{gain.n}</Text>}
         </Text>
         <Text style={styles.visitors}>오늘의 방문객 {visitorsFor(hud.score).toLocaleString()}명</Text>
-        <Text style={styles.visitors}>북항 체류 {days}일째</Text>
+        <Text style={styles.visitors}>
+          북항 체류 {days}일째 · {phaseLabel(frame ? frame.phase : 'day')}
+        </Text>
+        {result.best > 0 && <Text style={styles.best}>🏆 최고 기록 {result.best}</Text>}
       </View>
 
       {frame && frame.time < toast.until && !hud.over && (
@@ -386,6 +437,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   exitText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
+  best: { color: '#ffe066', fontSize: 13, fontWeight: '800', marginTop: 2 },
   boost: { color: '#ffd34a', fontSize: 15, fontWeight: '900', marginBottom: 2 },
   gain: { color: '#ffe066', fontWeight: '800' },
   label: {

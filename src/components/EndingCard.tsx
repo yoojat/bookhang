@@ -113,7 +113,7 @@ export default function EndingCard(props: Props) {
 
         <Text style={styles.epilogue}>{ending.epilogue}</Text>
         <Text style={styles.epilogueMascot}>
-          북항이는 이제 부산 동구의 마스코트가 되어 모두의 곁에 남기로 했어요.
+          북항이는 이제 모두의 마음속 마스코트로 오래오래 남기로 했어요.
         </Text>
 
         <View style={styles.buttons}>

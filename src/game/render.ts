@@ -11,7 +11,8 @@ import {
 } from '@shopify/react-native-skia';
 
 import { CHICKEN, COLORS, SHARK } from './config';
-import { GameState, isHighTide } from './engine';
+import { GameState, isHighTide, nightDark } from './engine';
+import { drawGlare, drawLampBeam, drawLampPerson } from './lamps';
 import { drawShot } from './cannon';
 import { drawNet } from './net';
 import { fill, stroke } from './paint';
@@ -334,6 +335,18 @@ function drawExitMarker(canvas: SkCanvas, g: GameState) {
   }
 }
 
+// 밤에는 화면 전체에 어두운 푸른 막을 씌우고, 해질녘/새벽에는 주황빛을 살짝 더한다.
+function drawNightOverlay(canvas: SkCanvas, g: GameState) {
+  const dark = nightDark(g);
+  if (dark < 0.02) return;
+  const big = 4000;
+  const r = Skia.XYWHRect(g.camera.x - big, g.camera.y - big, big * 2, big * 2);
+  const a = (Math.round(dark * 0.58 * 25) / 25).toFixed(2);
+  canvas.drawRect(r, fill(`rgba(8,18,56,${a})`));
+  const glow = (Math.round(dark * (1 - dark) * 4 * 0.2 * 25) / 25).toFixed(2);
+  if (Number(glow) > 0) canvas.drawRect(r, fill(`rgba(255,130,60,${glow})`));
+}
+
 // 상어가 이 거리 안으로 오면 구경꾼이 하트를 띄우며 좋아한다.
 const LOVE_DISTANCE = 330;
 
@@ -431,10 +444,15 @@ export function renderGame(g: GameState): SkPicture {
       drawShark(canvas, g);
       drawChickens(canvas, g, true);
       for (const net of g.nets) drawNet(canvas, net, g.time, isHighTide(g));
-      drawExitMarker(canvas, g);
-      for (const shot of g.shots) drawShot(canvas, shot);
+      for (const lamp of g.lamps) drawLampPerson(canvas, g, lamp);
       // 다리와 그물은 상어 위로 지나간다.
       canvas.drawPicture(front);
+      drawNightOverlay(canvas, g);
+      // 밤에도 잘 보여야 하는 것들은 어둠 위에 그린다.
+      drawExitMarker(canvas, g);
+      for (const shot of g.shots) drawShot(canvas, shot);
+      for (const lamp of g.lamps) drawLampBeam(canvas, lamp);
+      drawGlare(canvas, g);
       canvas.restore();
       drawJoystick(canvas, g);
     },

@@ -43,7 +43,7 @@ export const GAME = {
   // 구경꾼: 기본 인원 + 점수 N점마다 1명. 사람 한 명이 방문객 수 몇 명을 나타내는지도 정한다.
   crowdBase: 0,
   // 게임 속 하루: 플레이 시간 이만큼(초)이 지날 때마다 북항 체류일이 하루 늘어난다.
-  secondsPerDay: 30,
+  secondsPerDay: 60,
   scorePerPerson: 10,
   visitorsPerPerson: 1200,
   // 어디야 카페: 구경꾼 한 명당 팔리는 커피 잔 수(표시용), 줄 서는 최대 인원
@@ -118,7 +118,7 @@ export const NET = {
   speedStart: 80,
   speedMax: 150,
   // 그물 띠의 두께
-  band: 40,
+  band: 52,
   // 두 배 사이 빈틈의 반폭: 처음 -> 최고 난이도
   gapStart: 112,
   gapMin: 72,
@@ -131,6 +131,50 @@ export const TIDE = {
   first: 75,
   period: 60,
   duration: 9,
+};
+
+// 낮과 밤: 하루(secondsPerDay)가 낮 -> 해질녘 -> 밤 -> 새벽 순서로 흐른다.
+// 실제로 북항에서 밤(오후 9시, 새벽 2시)에 사람들이 손전등과 대형 랜턴, 레이저로 부캉이를 비춰
+// 눈부심과 생체리듬 교란 우려가 제기된 일에서 따왔다.
+export const DAY = {
+  // 하루 중 비율: 낮 [0, dayEnd), 해질녘 [dayEnd, duskEnd), 밤 [duskEnd, nightEnd), 새벽 [nightEnd, 1)
+  dayEnd: 0.58,
+  duskEnd: 0.7,
+  nightEnd: 0.93,
+};
+
+export type DayPhase = 'day' | 'dusk' | 'night' | 'dawn';
+
+const smooth = (x: number) => {
+  const t = Math.min(1, Math.max(0, x));
+  return t * t * (3 - 2 * t);
+};
+
+// 플레이 시간으로 지금이 하루 중 어느 때인지, 얼마나 어두운지(0~1)를 구한다.
+export function dayInfo(playTime: number): { phase: DayPhase; dark: number } {
+  const t = (playTime / GAME.secondsPerDay) % 1;
+  if (t < DAY.dayEnd) return { phase: 'day', dark: 0 };
+  if (t < DAY.duskEnd) return { phase: 'dusk', dark: smooth((t - DAY.dayEnd) / (DAY.duskEnd - DAY.dayEnd)) };
+  if (t < DAY.nightEnd) return { phase: 'night', dark: 1 };
+  return { phase: 'dawn', dark: 1 - smooth((t - DAY.nightEnd) / (1 - DAY.nightEnd)) };
+}
+
+// 밤에 기슭에서 불빛을 비추는 사람들
+export const LAMP = {
+  // 밤이 시작되고 첫 사람이 나타나기까지 / 이후 간격(초)
+  firstDelay: 2.5,
+  intervalMin: 5,
+  intervalMax: 8,
+  // 사람이 머무는 시간(초). 처음 arrive 초 동안은 올라와 자리를 잡는다.
+  life: 7.5,
+  arrive: 0.8,
+  // 손전등: 좁고 빠르게 쫓아온다 / 대형 랜턴: 넓지만 느리다.
+  flash: { half: 0.17, follow: 2.0, need: 1.1 },
+  lantern: { half: 0.36, follow: 1.0, need: 1.6 },
+  // 불빛에 이만큼(초) 계속 비치면 하트가 하나 깎인다. (위 need 참고) 비치지 않으면 이 배율로 빠르게 회복한다.
+  recover: 1.6,
+  // 두 번째 사람부터는 이 체류일(일) 이후에 함께 나타난다.
+  secondAfterDays: 1,
 };
 
 export const difficulty = (time: number) => Math.min(1, time / CANNON.rampSeconds);

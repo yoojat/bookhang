@@ -42,11 +42,11 @@ const SHARK_BODY = '#7aa6cf';
 const SHARK_FIN = '#5a86b0';
 const SHARK_BELLY = '#f4f8fb';
 // 도안을 통째로 줄여서 실제 크기에 맞춘다.
-const SHARK_SCALE = 0.9;
+const SHARK_SCALE = 1.1;
 
 // 수면선 높이(스프라이트 좌표). 몸의 위쪽 절반이 물 위로 나오고, 먹을 때는 떠올라 입을 드러낸다.
-const WATERLINE_IDLE = 4;
-const WATERLINE_FAST = 2;
+const WATERLINE_IDLE = 13;
+const WATERLINE_FAST = 9;
 
 function speedFraction(g: GameState) {
   return Math.min(1, g.shark.speed / SHARK.maxSpeed);
@@ -236,6 +236,14 @@ export function drawShark(canvas: SkCanvas, g: GameState) {
     }
   }
 
+  // 몸이 수면과 만나는 곳의 물거품 띠
+  const wob = Math.sin(g.time * 4) * 4;
+  canvas.drawOval(Skia.XYWHRect(s.x - 78 * k, waterY - 6 * k, 156 * k, 12 * k), stroke('rgba(255,255,255,0.8)', 3, true));
+  canvas.drawOval(
+    Skia.XYWHRect(s.x - 96 * k - wob, waterY - 10 * k, 192 * k + wob * 2, 20 * k),
+    stroke('rgba(255,255,255,0.4)', 2, true),
+  );
+
   canvas.save();
   canvas.clipRect(Skia.XYWHRect(x0, top, w, waterY - top), ClipOp.Intersect, true);
   drawSharkSprite(canvas, g);
@@ -247,14 +255,6 @@ export function drawShark(canvas: SkCanvas, g: GameState) {
   drawSharkSprite(canvas, g);
   canvas.restore();
   canvas.restore();
-
-  // 몸이 수면과 만나는 곳의 물거품 띠
-  const wob = Math.sin(g.time * 4) * 4;
-  canvas.drawOval(Skia.XYWHRect(s.x - 64 * k, waterY - 6 * k, 128 * k, 12 * k), stroke('rgba(255,255,255,0.85)', 3, true));
-  canvas.drawOval(
-    Skia.XYWHRect(s.x - 86 * k - wob, waterY - 10 * k, 172 * k + wob * 2, 20 * k),
-    stroke('rgba(255,255,255,0.4)', 2, true),
-  );
 
   // 헤엄칠 때 뒤로 퍼지는 가벼운 물결과 물방울
   if (sp > 0.1) {

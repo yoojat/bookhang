@@ -1,5 +1,6 @@
-import { CAFFEINE, CANNON, CHICKEN, difficulty, ItemKind, NET, TIDE, FISH, FishKind, GAME, SHARK } from './config';
+import { CAFFEINE, CANNON, CHICKEN, dayInfo, DayPhase, difficulty, ItemKind, LAMP, NET, TIDE, FISH, FishKind, GAME, SHARK } from './config';
 import {
+  BRIDGES,
   constrain,
   CROWD,
   EXIT_S,
@@ -83,6 +84,23 @@ export interface Net {
   hit: boolean;
 }
 
+// 밤에 기슭에서 상어를 불빛으로 비추는 사람. (손전등 또는 대형 랜턴)
+export interface Lamp {
+  id: number;
+  kind: 'flash' | 'lantern';
+  // 사람 위치
+  x: number;
+  y: number;
+  t: number;
+  // 불빛이 향하는 현재 방향과, 불빛이 수면에 닿는 지점
+  angle: number;
+  tx: number;
+  ty: number;
+  // 눈부심 누적(0~1). 1이 되면 하트가 깎인다.
+  exposure: number;
+  hit: boolean;
+}
+
 export interface GameState {
   // 화면 크기 (조이스틱/카메라 계산용)
   width: number;
@@ -120,6 +138,12 @@ export interface GameState {
   throwerTimer: number;
   // 카페인 부스트가 끝나는 게임 시각
   boostUntil: number;
+  // 밤의 불빛
+  lamps: Lamp[];
+  lampTimer: number;
+  phase: DayPhase;
+  // 상어가 불빛에 비친 정도(0~1): 화면 효과용
+  glare: number;
   // 그물 몰이와 만조
   nets: Net[];
   netTimer: number;
@@ -154,6 +178,8 @@ export interface GameEvents {
   onBoost: (until: number) => void;
   // 그물 몰이가 시작됐을 때 / 만조가 시작됐을 때(끝나는 게임 시각) / 바다로 나갔을 때
   onNet: () => void;
+  // 하루 중 때가 바뀔 때(해질녘/밤/새벽/낮)
+  onPhase: (phase: DayPhase) => void;
   onTide: (until: number) => void;
   onEscape: (how: 'swam' | 'netted') => void;
   // 출구 앞에 도착해 "바다로 나갈까요?"를 물을 때
@@ -207,12 +233,12 @@ export function createGame(width: number, height: number): GameState {
     shark: {
       x: start.x,
       y: start.y,
-      angle: Math.PI / 2,
+      angle: 0,
       radius: SHARK.baseRadius,
       speed: 0,
       blink: 0,
       facing: 1,
-      tilt: 0.9,
+      tilt: 0,
       eat: 0,
     },
     crowd: { shown: 0, appear: [] },
@@ -226,6 +252,10 @@ export function createGame(width: number, height: number): GameState {
     chickens: [],
     throwerTimer: CHICKEN.firstDelay,
     boostUntil: 0,
+    lamps: [],
+    lampTimer: LAMP.firstDelay,
+    phase: 'day',
+    glare: 0,
     nets: [],
     netTimer: NET.firstDelay,
     tideUntil: 0,
@@ -249,6 +279,13 @@ export function createGame(width: number, height: number): GameState {
   for (let i = 0; i < g.queue.shown; i++) g.queue.appear.push(-10);
   for (let i = 0; i < GAME.maxFish; i++) spawnFish(g, 300);
   return g;
+}
+
+// 화면(게임 영역) 크기가 바뀌었을 때 게임에 알린다. (웹에서 창 크기를 바꾸는 경우 등)
+export function resizeGame(g: GameState, width: number, height: number) {
+  g.width = width;
+  g.height = height;
+  g.zoom = width / (GAME.viewWidth + GAME.shopViewExtra * g.focus);
 }
 
 // 출구 질문에 대한 대답: 다음 프레임에 처리된다.
@@ -443,6 +480,108 @@ function updateNets(g: GameState, dt: number, events: GameEvents) {
   }
 }
 
+// 어두운 정도(0~1): 밤에만 불빛 사람이 나타난다.
+export const nightDark = (g: GameState) => dayInfo(g.playTime).dark;
+
+function spawnLamp(g: GameState) {
+  const s = g.shark;
+  const halfVW = g.width / g.zoom / 2;
+  const halfVH = g.height / g.zoom / 2;
+  const near = nearestPlay(s.x, s.y);
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const cs = Math.min(SPAWN_END_S - 80, Math.max(PLAY_START_S + 80, near.s + (Math.random() * 2 - 1) * 420));
+    const p = pointAt(cs);
+    const x = p.x - Math.sin(p.angle) * side * (HALF_W + 70);
+    const y = p.y + Math.cos(p.angle) * side * (HALF_W + 70);
+    // 화면 안에 보이는 기슭에서만, 다리 위는 피한다.
+    if (Math.abs(x - g.camera.x) > halfVW - 40 || Math.abs(y - g.camera.y) > halfVH - 90) continue;
+    if (BRIDGES.some((b) => Math.abs(b.s - cs) < 140)) continue;
+    // 처음에는 자기 쪽 수면을 비추다가 곧 상어를 쫓는다.
+    const startX = p.x - Math.sin(p.angle) * side * (HALF_W * 0.4);
+    const startY = p.y + Math.cos(p.angle) * side * (HALF_W * 0.4);
+    g.lamps.push({
+      id: g.nextId++,
+      kind: Math.random() < 0.55 ? 'flash' : 'lantern',
+      x,
+      y,
+      t: 0,
+      angle: Math.atan2(startY - y, startX - x),
+      tx: startX,
+      ty: startY,
+      exposure: 0,
+      hit: false,
+    });
+    return;
+  }
+}
+
+function updateLamps(g: GameState, dt: number, events: GameEvents) {
+  const s = g.shark;
+  const info = dayInfo(g.playTime);
+  if (info.phase !== g.phase) {
+    g.phase = info.phase;
+    events.onPhase(info.phase);
+  }
+
+  const night = info.phase === 'night';
+  const days = Math.floor(g.playTime / GAME.secondsPerDay);
+  const maxLamps = days >= LAMP.secondAfterDays ? 2 : 1;
+  g.lampTimer -= dt;
+  if (night && g.lampTimer <= 0 && g.lamps.length < maxLamps) {
+    spawnLamp(g);
+    g.lampTimer = LAMP.intervalMin + Math.random() * (LAMP.intervalMax - LAMP.intervalMin);
+  }
+  if (!night && g.lampTimer < LAMP.firstDelay) g.lampTimer = LAMP.firstDelay;
+
+  // 다리 밑은 그림자: 불빛이 닿지 않는다.
+  const lane = sharkLane(g);
+  const shaded = BRIDGES.some((b) => Math.abs(b.s - lane.s) < 70);
+
+  let glare = 0;
+  for (let i = g.lamps.length - 1; i >= 0; i--) {
+    const lamp = g.lamps[i];
+    lamp.t += dt;
+    // 밤이 끝나면 불빛을 끄고 돌아간다.
+    if (lamp.t > LAMP.life || info.phase === 'dawn' || info.phase === 'day') {
+      g.lamps.splice(i, 1);
+      continue;
+    }
+    const spec = lamp.kind === 'flash' ? LAMP.flash : LAMP.lantern;
+
+    // 불빛이 닿는 지점은 상어를 부드럽게 쫓아간다.
+    if (lamp.t > LAMP.arrive) {
+      const follow = Math.min(1, spec.follow * dt);
+      lamp.tx += (s.x - lamp.tx) * follow;
+      lamp.ty += (s.y - lamp.ty) * follow;
+    }
+    lamp.angle = Math.atan2(lamp.ty - lamp.y, lamp.tx - lamp.x);
+
+    // 상어가 불빛 안에 있는지: 방향이 원뿔 안이고 거리가 불빛 끝보다 가깝다.
+    const dx = s.x - lamp.x;
+    const dy = s.y - lamp.y;
+    const dist = Math.hypot(dx, dy);
+    const reach = Math.hypot(lamp.tx - lamp.x, lamp.ty - lamp.y) + 70;
+    let diff = Math.atan2(dy, dx) - lamp.angle;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    const lit = lamp.t > LAMP.arrive && dist < reach && Math.abs(diff) < spec.half + Math.atan2(s.radius, Math.max(1, dist));
+
+    if (lit && !shaded) {
+      lamp.exposure = Math.min(1, lamp.exposure + dt / spec.need);
+    } else {
+      lamp.exposure = Math.max(0, lamp.exposure - dt * LAMP.recover / spec.need);
+    }
+    glare = Math.max(glare, lamp.exposure);
+    // 한 사람당 한 번만 하트가 깎인다.
+    if (lamp.exposure >= 1 && !lamp.hit) {
+      if (hurt(g, events)) lamp.hit = true;
+      lamp.exposure = 0.6;
+    }
+  }
+  g.glare = glare;
+}
+
 function normalizeAngle(a: number) {
   while (a > Math.PI) a -= Math.PI * 2;
   while (a < -Math.PI) a += Math.PI * 2;
@@ -623,7 +762,9 @@ export function updateGame(g: GameState, dt: number, events: GameEvents) {
   if (c > 0.2) s.facing = 1;
   else if (c < -0.2) s.facing = -1;
   // 위아래로 헤엄칠 때도 고개를 크게 숙이지 않고 수면 위에서 살짝만 기운다.
-  const targetTilt = Math.max(-0.3, Math.min(0.3, Math.sin(s.angle) * 0.4));
+  // (가만히 있을 때는 기울이지 않는다: 헤엄치는 속도에 비례해서만 기운다.)
+  const speedFrac = Math.min(1, s.speed / SHARK.maxSpeed);
+  const targetTilt = Math.max(-0.3, Math.min(0.3, Math.sin(s.angle) * 0.4 * speedFrac));
   s.tilt += (targetTilt - s.tilt) * Math.min(1, 10 * dt);
   if (s.eat > 0) s.eat -= dt;
 
@@ -636,6 +777,8 @@ export function updateGame(g: GameState, dt: number, events: GameEvents) {
   updateShots(g, dt, events);
   if (g.over) return;
   updateNets(g, dt, events);
+  if (g.over) return;
+  updateLamps(g, dt, events);
   if (g.over) return;
 
   // 출구 앞: 스스로 가면 "바다로 나갈까요?"를 묻고, 그물에 몰려 나가면 묻지 않는다.
@@ -670,8 +813,8 @@ export function updateGame(g: GameState, dt: number, events: GameEvents) {
   }
 
   // --- 물고기 이동/충돌 ---
-  const mouthX = s.x + s.facing * Math.cos(s.tilt) * s.radius * 3.2;
-  const mouthY = s.y + Math.sin(s.tilt) * s.radius * 3.2;
+  const mouthX = s.x + s.facing * Math.cos(s.tilt) * s.radius * 3.9;
+  const mouthY = s.y + Math.sin(s.tilt) * s.radius * 3.9;
 
   for (let i = g.fish.length - 1; i >= 0; i--) {
     const f = g.fish[i];
