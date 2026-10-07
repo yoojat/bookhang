@@ -534,10 +534,6 @@ function updateLamps(g: GameState, dt: number, events: GameEvents) {
   }
   if (!night && g.lampTimer < LAMP.firstDelay) g.lampTimer = LAMP.firstDelay;
 
-  // 다리 밑은 그림자: 불빛이 닿지 않는다.
-  const lane = sharkLane(g);
-  const shaded = BRIDGES.some((b) => Math.abs(b.s - lane.s) < 70);
-
   let glare = 0;
   for (let i = g.lamps.length - 1; i >= 0; i--) {
     const lamp = g.lamps[i];
@@ -549,11 +545,15 @@ function updateLamps(g: GameState, dt: number, events: GameEvents) {
     }
     const spec = lamp.kind === 'flash' ? LAMP.flash : LAMP.lantern;
 
-    // 불빛이 닿는 지점은 상어를 부드럽게 쫓아간다.
+    // 불빛이 닿는 지점은 상어를 부드럽게 쫓아가되, 가까운 거리(range)까지만 닿는다.
     if (lamp.t > LAMP.arrive) {
+      const sx = s.x - lamp.x;
+      const sy = s.y - lamp.y;
+      const sd = Math.hypot(sx, sy) || 1;
+      const k = Math.min(1, (spec.range - 40) / sd);
       const follow = Math.min(1, spec.follow * dt);
-      lamp.tx += (s.x - lamp.tx) * follow;
-      lamp.ty += (s.y - lamp.ty) * follow;
+      lamp.tx += (lamp.x + sx * k - lamp.tx) * follow;
+      lamp.ty += (lamp.y + sy * k - lamp.ty) * follow;
     }
     lamp.angle = Math.atan2(lamp.ty - lamp.y, lamp.tx - lamp.x);
 
@@ -567,7 +567,7 @@ function updateLamps(g: GameState, dt: number, events: GameEvents) {
     while (diff < -Math.PI) diff += Math.PI * 2;
     const lit = lamp.t > LAMP.arrive && dist < reach && Math.abs(diff) < spec.half + Math.atan2(s.radius, Math.max(1, dist));
 
-    if (lit && !shaded) {
+    if (lit) {
       lamp.exposure = Math.min(1, lamp.exposure + dt / spec.need);
     } else {
       lamp.exposure = Math.max(0, lamp.exposure - dt * LAMP.recover / spec.need);
@@ -575,7 +575,11 @@ function updateLamps(g: GameState, dt: number, events: GameEvents) {
     glare = Math.max(glare, lamp.exposure);
     // 한 사람당 한 번만 하트가 깎인다.
     if (lamp.exposure >= 1 && !lamp.hit) {
-      if (hurt(g, events)) lamp.hit = true;
+      if (hurt(g, events)) {
+        lamp.hit = true;
+        // 한 번 비춘 사람은 곧 불빛을 거두고 돌아간다.
+        lamp.t = Math.max(lamp.t, LAMP.life - 1);
+      }
       lamp.exposure = 0.6;
     }
   }

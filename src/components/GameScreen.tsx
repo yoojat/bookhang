@@ -128,7 +128,7 @@ export default function GameScreen() {
           phase === 'dusk'
             ? '🌆 해가 지고 있어요'
             : phase === 'night'
-              ? '🌙 밤이에요! 기슭의 불빛에 오래 비치면 하트가 깎여요. 다리 밑은 안전해요'
+              ? '🌙 밤이에요! 기슭의 불빛에 오래 비치면 하트가 깎여요'
               : phase === 'dawn'
                 ? '🌅 날이 밝아 와요'
                 : '';

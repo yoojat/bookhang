@@ -166,11 +166,12 @@ export const LAMP = {
   intervalMin: 5,
   intervalMax: 8,
   // 사람이 머무는 시간(초). 처음 arrive 초 동안은 올라와 자리를 잡는다.
-  life: 7.5,
+  life: 5.5,
   arrive: 0.8,
   // 손전등: 좁고 빠르게 쫓아온다 / 대형 랜턴: 넓지만 느리다.
-  flash: { half: 0.17, follow: 2.0, need: 1.1 },
-  lantern: { half: 0.36, follow: 1.0, need: 1.6 },
+  // range: 불빛이 닿는 최대 거리(월드 단위). 기슭에서 수로 한가운데 근처까지만 비추고, 그보다 멀면 쫓아가지 않는다.
+  flash: { half: 0.17, follow: 2.0, need: 1.1, range: 330 },
+  lantern: { half: 0.36, follow: 1.0, need: 1.6, range: 290 },
   // 불빛에 이만큼(초) 계속 비치면 하트가 하나 깎인다. (위 need 참고) 비치지 않으면 이 배율로 빠르게 회복한다.
   recover: 1.6,
   // 두 번째 사람부터는 이 체류일(일) 이후에 함께 나타난다.
