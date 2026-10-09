@@ -23,7 +23,7 @@ const H = 2868;
 const FONT = "Apple SD Gothic Neo, AppleGothic, Noto Sans KR, sans-serif";
 
 const slides = [
-  { raw: '1-play', lines: ['북항 수로의 아기 상어', '북항이를 도와주세요!'], colors: ['#3db5f0', '#1f78c8'] },
+  { raw: '1-play', lines: ['북항 수로에 나타난 상어', '북항이를 도와주세요!'], colors: ['#3db5f0', '#1f78c8'] },
   { raw: '2-cannon', lines: ['물대포 배의 조준을', '피해 도망쳐요'], colors: ['#ff9a5a', '#e0563f'] },
   { raw: '3-net', lines: ['그물 사이 빈틈으로', '빠져나가요'], colors: ['#44c6b8', '#1d8aa8'] },
   { raw: '4-boost', lines: ['카페인 부스트로', '쌩쌩 헤엄쳐요'], colors: ['#5a7bd8', '#2b3f9e'] },

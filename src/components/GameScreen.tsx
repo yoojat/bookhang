@@ -372,7 +372,7 @@ export default function GameScreen() {
         <View style={[styles.overlay, styles.titleOverlay]}>
           <Text style={styles.titleEmoji}>🦈</Text>
           <Text style={styles.titleName}>북항이</Text>
-          <Text style={styles.titleSub}>북항 친수공원 수로에 갇힌 아기 상어{'\n'}배고픈 북항이를 도와주세요!</Text>
+          <Text style={styles.titleSub}>북항 친수공원 수로에 들어온 상어{'\n'}배고픈 북항이를 도와주세요!</Text>
           <View style={styles.howto}>
             <Text style={styles.howtoGoal}>🎯 목표: 높은 점수를 모으고 바다로 탈출하기!</Text>
             <Text style={styles.howtoLine}>👆 화면을 누른 채 드래그하면 북항이가 움직여요</Text>
